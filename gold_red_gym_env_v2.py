@@ -491,7 +491,7 @@ class RedGymEnv(Env):
         return self.max_level_rew
 
     def get_badges(self):
-        return self.bit_count(self.read_m(0xD57D)) # 성도 지방 뱃지에 한하여,
+        return self.bit_count(self.read_m(0xD57C)) # 성도 지방 뱃지에 한하여,
 
     def read_party(self):
         return [
