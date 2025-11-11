@@ -533,28 +533,28 @@ class GoldEnv(Env):
 
         return state_scores
 
-    def update_max_op_level(self):
-        opp_base_level = 5
-        opponent_level = (
-                max([
-                    self.read_m(a)
-                    for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]  # 아직 여긴 안 고침.
-                    # 여기 레드 버전에서는 상대 포켓몬 6마리의 레벨을 각각 할당하는 메모리주소가 6개가 있는데,
-                    # 골드 버전에서는 마주하고 있는 상대 포켓몬의 레벨만 할당하는 메모리주소 0XD0FC 하나 뿐임.
-                    # 이를 어떻게 해결해야할까?
-                ])
-                - opp_base_level
-        )
-        '''
-        $DD56 = Pokemon 1
-        $DD57 = Pokemon 2
-        $DD58 = Pokemon 3
-        $DD59 = Pokemon 4
-        $DD5A = Pokemon 5
-        $DD5B = Pokemon 6
-        '''
-        self.max_opponent_level = max(self.max_opponent_level, opponent_level)
-        return self.max_opponent_level
+    # def update_max_op_level(self):
+    #     opp_base_level = 5
+    #     opponent_level = (
+    #             max([
+    #                 self.read_m(a)
+    #                 for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]  # 아직 여긴 안 고침.
+    #                 # 여기 레드 버전에서는 상대 포켓몬 6마리의 레벨을 각각 할당하는 메모리주소가 6개가 있는데,
+    #                 # 골드 버전에서는 마주하고 있는 상대 포켓몬의 레벨만 할당하는 메모리주소 0XD0FC 하나 뿐임.
+    #                 # 이를 어떻게 해결해야할까?
+    #             ])
+    #             - opp_base_level
+    #     )
+    #     '''
+    #     $DD56 = Pokemon 1
+    #     $DD57 = Pokemon 2
+    #     $DD58 = Pokemon 3
+    #     $DD59 = Pokemon 4
+    #     $DD5A = Pokemon 5
+    #     $DD5B = Pokemon 6
+    #     '''
+    #     self.max_opponent_level = max(self.max_opponent_level, opponent_level)
+    #     return self.max_opponent_level
 
     def update_max_event_rew(self):
         cur_rew = self.get_all_events_reward()
