@@ -50,12 +50,25 @@ class GoldEnv(Env):
         self.map_frame_writer = None
         self.reset_count = 0
         self.all_runs = []
-        #문제점: essential_map_locations 딕셔너리가 여전히 레드 버전(관동)의 맵 ID (40, 0, 12...)로 채워져 있습니다.
-        #해결책: 골드 버전(성도)의 주요 스토리 진행 순서에 맞는 맵 ID로 이 리스트를 완전히 새로 만들어야 합니다. (예: [연두마을ID, 도라지시티ID, ...])
+    with open("map_data.json","r",encoding="utf-8") as f:
+        _regions = json.load(f)["regions"]
+        _name_to_id = {r["name"]: int(r["id"]) for r in _regions}
+
+        _essential_order = [
+            "New Bark Town","Cherrygrove City","Route 29","Route 30","Violet City",
+            "Sprout Tower","Route 31","Route 32","Azalea Town","Ilex Forest",
+            "Goldenrod City","National Park","Ecruteak City","Burned Tower",
+            "Tin Tower (Bell Tower)","Route 38","Olivine City","Olivine Lighthouse",
+            "Cianwood City","Whirl Islands","Route 42","Mahogany Town","Lake of Rage",
+            "Mt. Mortar","Ice Path","Blackthorn City","Dragon's Den",
+            "Victory Road (Johto)","Indigo Plateau",
+        ]
+        _missing = [n for n in _essential_order if n not in _name_to_id]
+        if _missing:
+            raise ValueError(f"map_data.json에 없는 지명: {_missing}")
+
         self.essential_map_locations = {
-            v: i for i, v in enumerate([
-                40, 0, 12, 1, 13, 51, 2, 54, 14, 59, 60, 61, 15, 3, 65
-            ])
+            _name_to_id[name]: i for i, name in enumerate(_essential_order)
         }
 
         # Set this in SOME subclasses
