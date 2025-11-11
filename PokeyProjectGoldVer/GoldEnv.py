@@ -609,8 +609,9 @@ class GoldEnv(Env):
         return np.sin(val * 2 ** np.arange(self.enc_freqs))
 
     def update_map_progress(self):
-        map_idx = self.read_m(0xDA01)
+        _, _, map_idx = self.get_game_coords()  # ← 같은 경로로 맞추기
         self.max_map_progress = max(self.max_map_progress, self.get_map_progress(map_idx))
+
 
     def get_map_progress(self, map_idx):
         if map_idx in self.essential_map_locations.keys():
