@@ -497,7 +497,7 @@ class GoldEnv(Env):
     #문제점: _get_obs에서는 배지 주소를 0xD57C로 읽는데, get_badges 함수에서는 0xD57D로 읽습니다. 주소가 다릅니다.
     #해결책: wram.asm에서 확인한 정확한 배지 주소로 통일해야 합니다. (DataCrystal 정보로는 성도 배지가 $DCD0, 관동 배지가 $DCD1이었습니다. D57C/D57D가 맞는지 재확인이 필요합니다.)
     def get_badges(self):
-        return self.bit_count(self.read_m(0xD57D))  # 성도 지방 뱃지에 한하여,
+        return self.bit_count(self.read_m(0xD57C))  # 성도 지방 뱃지에 한하여,
 
     def read_party(self):
         return [
