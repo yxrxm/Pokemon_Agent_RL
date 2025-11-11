@@ -50,13 +50,28 @@ class GoldEnv(Env):
         self.map_frame_writer = None
         self.reset_count = 0
         self.all_runs = []
-        #문제점: essential_map_locations 딕셔너리가 여전히 레드 버전(관동)의 맵 ID (40, 0, 12...)로 채워져 있습니다.
-        #해결책: 골드 버전(성도)의 주요 스토리 진행 순서에 맞는 맵 ID로 이 리스트를 완전히 새로 만들어야 합니다. (예: [연두마을ID, 도라지시티ID, ...])
+# 53~59 줄 전체 교체
+    with open("map_data.json","r",encoding="utf-8") as f:
+        _regions = json.load(f)["regions"]
+        _name_to_id = {r["name"]: int(r["id"]) for r in _regions}
+
+        _essential_order = [
+            "New Bark Town","Cherrygrove City","Route 29","Route 30","Violet City",
+            "Sprout Tower","Route 31","Route 32","Azalea Town","Ilex Forest",
+            "Goldenrod City","National Park","Ecruteak City","Burned Tower",
+            "Tin Tower (Bell Tower)","Route 38","Olivine City","Olivine Lighthouse",
+            "Cianwood City","Whirl Islands","Route 42","Mahogany Town","Lake of Rage",
+            "Mt. Mortar","Ice Path","Blackthorn City","Dragon's Den",
+            "Victory Road (Johto)","Indigo Plateau",
+        ]
+        _missing = [n for n in _essential_order if n not in _name_to_id]
+        if _missing:
+            raise ValueError(f"map_data.json에 없는 지명: {_missing}")
+
         self.essential_map_locations = {
-            v: i for i, v in enumerate([
-                40, 0, 12, 1, 13, 51, 2, 54, 14, 59, 60, 61, 15, 3, 65
-            ])
+            _name_to_id[name]: i for i, name in enumerate(_essential_order)
         }
+
 
         # Set this in SOME subclasses
         self.metadata = {"render.modes": []}
@@ -497,7 +512,8 @@ class GoldEnv(Env):
     #문제점: _get_obs에서는 배지 주소를 0xD57C로 읽는데, get_badges 함수에서는 0xD57D로 읽습니다. 주소가 다릅니다.
     #해결책: wram.asm에서 확인한 정확한 배지 주소로 통일해야 합니다. (DataCrystal 정보로는 성도 배지가 $DCD0, 관동 배지가 $DCD1이었습니다. D57C/D57D가 맞는지 재확인이 필요합니다.)
     def get_badges(self):
-        return self.bit_count(self.read_m(0xD57C))  # 성도 지방 뱃지에 한하여,
+        return self.bit_count(self.read_m(0xD57C))
+  # 성도 지방 뱃지에 한하여,
 
     def read_party(self):
         return [
@@ -533,28 +549,28 @@ class GoldEnv(Env):
 
         return state_scores
 
-    # def update_max_op_level(self):
-    #     opp_base_level = 5
-    #     opponent_level = (
-    #             max([
-    #                 self.read_m(a)
-    #                 for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]  # 아직 여긴 안 고침.
-    #                 # 여기 레드 버전에서는 상대 포켓몬 6마리의 레벨을 각각 할당하는 메모리주소가 6개가 있는데,
-    #                 # 골드 버전에서는 마주하고 있는 상대 포켓몬의 레벨만 할당하는 메모리주소 0XD0FC 하나 뿐임.
-    #                 # 이를 어떻게 해결해야할까?
-    #             ])
-    #             - opp_base_level
-    #     )
-    #     '''
-    #     $DD56 = Pokemon 1
-    #     $DD57 = Pokemon 2
-    #     $DD58 = Pokemon 3
-    #     $DD59 = Pokemon 4
-    #     $DD5A = Pokemon 5
-    #     $DD5B = Pokemon 6
-    #     '''
-    #     self.max_opponent_level = max(self.max_opponent_level, opponent_level)
-    #     return self.max_opponent_level
+    def update_max_op_level(self):
+        opp_base_level = 5
+        opponent_level = (
+                max([
+                    self.read_m(a)
+                    for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]  # 아직 여긴 안 고침.
+                    # 여기 레드 버전에서는 상대 포켓몬 6마리의 레벨을 각각 할당하는 메모리주소가 6개가 있는데,
+                    # 골드 버전에서는 마주하고 있는 상대 포켓몬의 레벨만 할당하는 메모리주소 0XD0FC 하나 뿐임.
+                    # 이를 어떻게 해결해야할까?
+                ])
+                - opp_base_level
+        )
+        '''
+        $DD56 = Pokemon 1
+        $DD57 = Pokemon 2
+        $DD58 = Pokemon 3
+        $DD59 = Pokemon 4
+        $DD5A = Pokemon 5
+        $DD5B = Pokemon 6
+        '''
+        self.max_opponent_level = max(self.max_opponent_level, opponent_level)
+        return self.max_opponent_level
 
     def update_max_event_rew(self):
         cur_rew = self.get_all_events_reward()
