@@ -50,8 +50,8 @@ class GoldEnv(Env):
         self.map_frame_writer = None
         self.reset_count = 0
         self.all_runs = []
-    with open("map_data.json","r",encoding="utf-8") as f:
-        _regions = json.load(f)["regions"]
+        with open("map_data.json","r",encoding="utf-8") as f:
+            _regions = json.load(f)["regions"]
         _name_to_id = {r["name"]: int(r["id"]) for r in _regions}
 
         _essential_order = [
