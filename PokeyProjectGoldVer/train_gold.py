@@ -38,7 +38,7 @@ def make_env(rank, env_conf, seed=0):
 
 
 if __name__ == "__main__":
-
+    
     use_wandb_logging = False
     ep_length = 2048 * 80
     sess_id = "runs"
