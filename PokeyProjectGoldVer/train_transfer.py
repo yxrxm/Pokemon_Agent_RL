@@ -1,11 +1,13 @@
 import os
 import uuid
+import torch
+import torch.nn as nn
 from pathlib import Path
 from GoldEnv import GoldEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList
+from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList, BaseCallback
 from tensorboard_callback import TensorboardCallback
 
 def make_env(rank, env_conf, seed=0):
@@ -15,24 +17,78 @@ def make_env(rank, env_conf, seed=0):
         return env
     set_random_seed(seed)
     return _init
+
+# === [1] 일반화 구현: 가져온 지식 얼리기 (Freeze) ===
+def freeze_layers(model, freeze_modules=['features_extractor']):
+    print(f"\n🥶 [일반화] '{freeze_modules}' 관련 신경망을 얼립니다 (업데이트 차단).")
+    print("   -> Red 버전에서 배운 '보는 능력'을 그대로 유지합니다.")
     
+    for name, param in model.policy.named_parameters():
+        # 지정한 모듈 이름이 포함된 레이어라면
+        if any(module in name for module in freeze_modules):
+            param.requires_grad = False # 학습되지 않도록 잠금
+            # print(f"   - Locked: {name}") # 너무 길어서 주석
+
+# === [2] 변별 후 융합: 나중에 녹이기 (Unfreeze Callback) ===
+class UnfreezeCallback(BaseCallback):
+    def __init__(self, unfreeze_step=2_000_000, verbose=0):
+        super().__init__(verbose)
+        self.unfreeze_step = unfreeze_step
+        self.is_frozen = True
+
+    def _on_step(self) -> bool:
+        # 지정된 스텝이 지나면 얼음 땡!
+        if self.is_frozen and self.num_timesteps >= self.unfreeze_step:
+            print(f"\n🔥 [변별 완료] {self.num_timesteps} 스텝 도달! 신경망을 녹입니다.")
+            print("   -> 이제 Gold 환경의 미세한 차이(색감 등)까지 학습하기 시작합니다.")
+            
+            # 모든 파라미터 잠금 해제
+            for param in self.model.policy.parameters():
+                param.requires_grad = True
+            
+            # 학습률을 조금 낮춰서 섬세하게 튜닝하도록 변경 (선택 사항)
+            self.model.learning_rate = 0.0001 
+            self.is_frozen = False
+        return True
+
+# 기존 가중치 이식 함수 (device='cpu' 수정본)
+def transfer_weights(new_model, old_weights_path, device="cpu"):
+    print(f"\n=== 가중치 이식 시작: {old_weights_path} ===")
+    try:
+        old_state_dict = torch.load(old_weights_path, map_location=device)
+        if not isinstance(old_state_dict, dict):
+             old_state_dict = old_state_dict.state_dict()
+    except Exception as e:
+        print(f"[오류] 파일 로드 실패: {e}")
+        return new_model
+
+    new_state_dict = new_model.policy.state_dict()
+    copied_count = 0
+    
+    # 모양이 같은 것만 복사 (눈, 운동신경 등)
+    for key in new_state_dict.keys():
+        if key in old_state_dict and new_state_dict[key].shape == old_state_dict[key].shape:
+            new_state_dict[key] = old_state_dict[key]
+            copied_count += 1
+
+    new_model.policy.load_state_dict(new_state_dict)
+    print(f">>> 이식 완료: {copied_count}개 레이어 복사됨.")
+    return new_model
+
 if __name__ == '__main__':
-    # === 설정 ===
     sess_id = str(uuid.uuid4())[:8]
-    sess_path = Path(f'session_finetune_{sess_id}')
+    sess_path = Path(f'session_smart_{sess_id}')
     sess_path.mkdir(exist_ok=True)
     log_dir = "./runs"
     
-    # 불러올 Red 버전 모델 파일명 (확장자 .zip 제외 가능)
-    pretrained_model_path = "./poke_26214400.zip" 
+    red_weights_path = "./poke_26214400/policy.pth"
 
-    print(f"=== Fine-tuning 시작! 세션 ID: {sess_id} ===")
-    print(f"=== 기존 모델 로드 중: {pretrained_model_path} ===")
+    print(f"=== 스마트 전이 학습 시작! 세션 ID: {sess_id} ===")
 
-    env_config = { 
+    env_config = {
         'headless': True, 
         'save_final_state': True, 
-        'early_stop': False, 
+        'early_stop': False,
         'action_freq': 24, 
         'init_state': './init.state', 
         'max_steps': 2048 * 10, 
@@ -40,65 +96,55 @@ if __name__ == '__main__':
         'save_video': False, 
         'fast_video': True, 
         'session_path': sess_path,
-        'gb_path': './PokeGold.gbc', # 골드 버전 롬 파일
+        'gb_path': './PokeGold.gbc', 
         'debug': False, 
         'sim_frame_dist': 2_000_000.0, 
         'extra_buttons': False
     }
 
-    num_cpu = 4 
+    num_cpu = 4
     env = SubprocVecEnv([make_env(i, env_config) for i in range(num_cpu)])
 
-    # === 콜백 설정 ===
-    checkpoint_callback = CheckpointCallback(
-        save_freq=500000 // num_cpu, 
-        save_path=log_dir,
-        name_prefix=f'poke_gold_finetune_{sess_id}'
+    model = PPO(
+        "MultiInputPolicy", 
+        env, 
+        verbose=1, 
+        tensorboard_log=log_dir,
+        learning_rate=0.0003,   
+        n_steps=2048,   
+        batch_size=64,   
+        n_epochs=10,   
+        gamma=0.997,   
+        gae_lambda=0.95,   
+        clip_range=0.2,   
+        ent_coef=0.01,   
     )
-    tensorboard_callback = TensorboardCallback(log_dir=log_dir)
-    callbacks = CallbackList([checkpoint_callback, tensorboard_callback])
 
-    # === 모델 불러오기 (핵심 변경 부분) ===
-    try:
-        # custom_objects 설정을 통해 학습률(learning_rate) 등을 현재 설정으로 덮어씌웁니다.
-        # 만약 에러가 난다면 env=env 부분을 빼고 로드한 뒤 model.set_env(env)를 해야할 수도 있습니다.
-        model = PPO.load(
-            pretrained_model_path, 
-            env=env,
-            verbose=1,
-            tensorboard_log=log_dir,
-            # 아래 파라미터들은 Red 학습 때와 달라도 덮어씌워집니다 (custom_objects 필요할 수 있음)
-            custom_objects={
-                "learning_rate": 0.0003, # Fine-tuning이라 학습률을 조금 낮추거나 그대로 유지
-                "n_steps": 2048,
-                "batch_size": 64,
-                "n_epochs": 10,
-                "gamma": 0.997,
-                "gae_lambda": 0.95,
-                "clip_range": 0.2,
-                "ent_coef": 0.01,
-            }
-        )
-        print(">>> 모델 로드 성공! Red 버전의 지능을 이어받아 학습합니다.")
+    # 1. 가중치 이식
+    if os.path.exists(red_weights_path):
+        model = transfer_weights(model, red_weights_path, device="cpu")
         
-    except ValueError as e:
-        print("\n[오류] 모델 구조가 일치하지 않습니다!")
-        print(f"이유: {e}")
-        print("Red 버전과 Gold 버전의 입력 데이터(Events 개수 등)가 달라서 호환되지 않을 확률이 높습니다.")
-        print("이 경우, train.py를 사용하여 처음부터 학습(쌩 학습)해야 합니다.")
-        env.close()
-        exit()
-    except Exception as e:
-        print(f"\n[오류] 모델 로드 중 알 수 없는 에러 발생: {e}")
-        env.close()
-        exit()
+        # 2. [핵심] 가져온 지식(CNN) 얼리기! (일반화 적용)
+        # 'features_extractor'는 CNN(시각 처리) 부분을 의미합니다.
+        freeze_layers(model, freeze_modules=['features_extractor'])
+        
+    else:
+        print("!!! Red 모델을 찾을 수 없어 쌩 학습합니다.")
 
-    print("Fine-tuning 학습 시작...")
+    # 콜백 설정
+    checkpoint_callback = CheckpointCallback(save_freq=500000 // num_cpu, save_path=log_dir, name_prefix=f'poke_smart_{sess_id}')
+    tensorboard_callback = TensorboardCallback(log_dir=log_dir)
     
+    # 3. [핵심] 200만 스텝 후에 녹이는 콜백 추가
+    unfreeze_callback = UnfreezeCallback(unfreeze_step=2_000_000) 
+    
+    callbacks = CallbackList([checkpoint_callback, tensorboard_callback, unfreeze_callback])
+
+    print("학습 시작...")
     try:
         model.learn(total_timesteps=100_000_000, callback=callbacks)
     except KeyboardInterrupt:
-        print("\n중단됨. 저장 중...")
+        print("\n중단됨.")
     
-    model.save(f"{sess_path}/final_model_finetuned")
+    model.save(f"{sess_path}/final_model_smart")
     env.close()
