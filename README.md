@@ -24,3 +24,51 @@ AI를 포켓몬 마스터로!
    3) Model
       - 현재 적용 모델: PPO
       - RPPO 등 성능 향상 가능한 모델 있는지 확인 必
+
+환경설정
+---
+1. 가상환경 생성 및 활성화 (Python 3.13)
+```powershell
+# 1. python 3.10 버전으로 'poke_env'라는 이름의 가상환경 생성
+conda create -n poke_env_2 python=3.10 -y
+
+# 2. 생성한 가상환경 활성화
+conda activate poke_env_2
+
+# (필요시) 기존 가상환경 비활성화
+# deactivate
+```
+
+2. `requirements.txt` 파일
+```powershell
+pip install -r requirements.txt
+    
+# (필요시) 캐시 제거
+pip cache purge
+```
+
+```txt
+# 오류시
+# requirements_v3.txt
+pyboy==2.6.0
+gymnasium
+stable_baselines3
+torch
+numpy
+pandas
+scikit-image
+matplotlib
+mediapy
+pillow
+einops
+wandb
+tensorboard
+websockets
+PySDL2
+pysdl2-dll
+```
+
+3. init 파일 생성
+```powershell
+python make_state.py
+```
