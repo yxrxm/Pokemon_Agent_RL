@@ -1,0 +1,16 @@
+pyboy==2.6.0
+gymnasium
+stable_baselines3
+torch
+numpy
+pandas
+scikit-image
+matplotlib
+mediapy
+pillow
+einops
+wandb
+tensorboard
+websockets
+PySDL2
+pysdl2-dll
