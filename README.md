@@ -1,6 +1,6 @@
 환경 설정 (colab)
 ---
-```
+```python
 from google.colab import drive
 import os
 
