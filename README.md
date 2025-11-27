@@ -1,15 +1,37 @@
-프로젝트명
+환경 설정 (colab)
 ---
-AI를 포켓몬 마스터로!
+```
+from google.colab import drive
+import os
 
-한 줄 소개
----
-강화학습을 통한 인공지능 모델 개발 프로젝트입니다. 
+# 1. 드라이브 마운트
+drive.mount('/content/drive')
 
-동기
----
-📹https://youtu.be/DcYLT37ImBY?feature=shared
-해당 영상을 보고 흥미를 느꼈고 영상 설명란에 깃허브 자료를 보고 비슷하게 개발할 수 있겠다고 생각해서 팀을 구성했고 영상과 같이 클리어를 목표로 더 나은 모델을 개발하는 것을 목표로 프로젝트를 진행하게 되었습니다.
+# 2. 프로젝트 경로 변수 설정
+project_path = '/content/drive/MyDrive/PokeyProjectGoldVer_hwlee_20251124'
+requirements_file = os.path.join(project_path, 'requirements_v3.txt')
+
+# 3. 작업 디렉토리 변경 (이 부분이 가장 중요합니다!)
+# !cd 명령어가 아닌 %cd 매직 커맨드를 써야 쉘 환경 전체에 적용됩니다.
+%cd "{project_path}"
+
+# 4. 의존성 설치 (이제 경로가 변경되었으므로 requirements.txt만 써도 되지만, 절대경로 유지도 괜찮습니다)
+if os.path.exists(requirements_file):
+    print(f"Installing packages from {requirements_file}...")
+    !pip install -r "{requirements_file}"
+else:
+    print(f"Error: requirements.txt not found at {requirements_file}")
+
+# 5. 실행
+# 이미 %cd로 폴더 안에 들어왔으므로 파일명만 적어도 실행됩니다.
+script_name = 'train_transfer_v2.7_colab.py'
+
+if os.path.exists(script_name):
+    print(f"Executing {script_name} from {os.getcwd()}...")
+    !python "{script_name}"
+else:
+    print(f"Error: File not found at {script_name}")
+```
 
 변경 사항
 ---
@@ -25,7 +47,7 @@ AI를 포켓몬 마스터로!
       - 현재 적용 모델: PPO
       - RPPO 등 성능 향상 가능한 모델 있는지 확인 必
 
-환경설정
+환경설정(Window)
 ---
 1. 가상환경 생성 및 활성화 (Python 3.13)
 ```powershell
