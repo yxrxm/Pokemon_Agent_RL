@@ -24,7 +24,7 @@ else:
 
 # 5. 실행
 # 이미 %cd로 폴더 안에 들어왔으므로 파일명만 적어도 실행됩니다.
-script_name = 'train_transfer_v2.7_colab.py'
+script_name = 'train_transfer_v2.9_colab_sped.py'
 
 if os.path.exists(script_name):
     print(f"Executing {script_name} from {os.getcwd()}...")
