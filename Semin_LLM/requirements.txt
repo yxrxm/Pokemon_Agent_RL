@@ -1,0 +1,19 @@
+# 1. 강화학습 및 환경
+gymnasium
+stable-baselines3[extra]
+pyboy
+shimmy>=2.0.0
+
+# 2. 데이터 처리 및 이미지
+numpy #게임 화면 받아오는 용도
+pillow
+
+# 3. Google Vertex AI (Gemini)
+google-cloud-aiplatform
+
+# 4. 로깅 및 시각화
+tensorboard
+
+#진행 막대용
+tqdm
+rich

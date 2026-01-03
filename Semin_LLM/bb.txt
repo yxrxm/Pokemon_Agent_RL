@@ -1,0 +1,12 @@
+나중에 배포하기 전에 삭제해야 될 파일
+config.py
+project_id랑 key_path
+check_model.py
+API key
+
+GoldEnv 생각 사항
+step에 조건을 추가해서 detail 보상을 추가할 수 있음.
+terminated를 설정해서 종료조건을 추가할 수 있음
+truncated는
+ai_coach.py에서 다양한 방법을 시도할 수 있음.
+evaluate_screen 법을 만드는 것.
