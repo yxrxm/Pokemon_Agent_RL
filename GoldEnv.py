@@ -145,6 +145,20 @@ class GoldEnv(Env):
         
         self.last_enemy_hp = 0  # 적의 이전 체력 기억
         self.has_reset_exploration = False # 도감 이벤트 때 탐험 리셋 했나요?
+        self.exploration_offset = 0.0 # 도감을 받을 때 탐험 점수 저장 변수
+
+        self.exp_snapshot = None
+        self.dmg_snapshot = None
+        self.level_snapshot = None
+        self.heal_snapshot = None
+
+        # [NEW] 야생 노가다로 쌓은 '거품 점수'를 기록할 변수들
+        self.exp_deduction = 0.0
+        self.dmg_deduction = 0.0
+        self.level_deduction = 0.0
+        self.heal_deduction = 0.0
+
+        self.is_combat_frozen = False # 전투 관련 리워드 동결됐냐?
 
     def reset(self, seed=None, options={}):
         self.seed = seed
@@ -180,6 +194,7 @@ class GoldEnv(Env):
         self.party_size = 0
         self.step_count = 0
         self.total_dmg_reward = 0
+        self.total_gain_money = 0
 
         self.base_event_flags = sum([
             self.bit_count(self.read_m(i))
@@ -233,6 +248,11 @@ class GoldEnv(Env):
         return observation
 
     def step(self, action):
+
+        self.step_count += 1
+
+        # if self.step_count%10 == 0:
+        #     print(f"{self.read_m(0xD116)}입니다.") #------------------------------------------------------------------- D116 0/비전투 1/야생 2/트레이너
 
         # 일시정지-------------------------------------
         self.check_manual_control()
@@ -293,6 +313,34 @@ class GoldEnv(Env):
             if self.print_rewards: # 로그 설정이 켜져 있다면 출력
                 print(f"\n📢 [Step {self.step_count}] 도감 획득 확인! 탐험 보상을 초기화합니다. (Backtracking 유도)")
             
+            # ---------------------------------------------------------------------
+            # [핵심] 현재 적용 중인 '탐험 가중치(explore_plus)'를 여기서도 계산해야 함
+            # (get_game_state_reward 함수와 로직이 100% 일치해야 점수 증발이 없음)
+            # ---------------------------------------------------------------------
+            
+            # A. 필요한 변수들 읽기
+            badge_count = self.get_badges()
+            level_sum = self.get_levels_sum()
+            # 레벨캡 공식 (사용자님 설정에 맞게 8 또는 9 확인 필요)
+            allowed_cap = 9 + (badge_count * 8) 
+            
+            # B. 트레이너 배틀 여부 확인 (0xD119: 0이면 야생, >0이면 트레이너)
+            trainer_class = self.read_m(0xD119)
+            is_trainer_battle = (trainer_class > 0)
+
+            # C. 가중치 결정 (리워드 함수와 똑같이!)
+            # "레벨이 너무 높고(Cap 초과) + 야생이다" -> 탐험 가중치 적용 중인 상태
+            if level_sum > allowed_cap and not is_trainer_battle:
+                current_explore_plus = 5.0  # ⚠️ 중요: 리워드 함수에서 설정한 값(5 or 10)과 똑같이 맞추세요!
+            else:
+                current_explore_plus = 1.0
+
+            # 현재까지 쌓아온 탐험 점수
+            current_explore_val = self.reward_scale * self.explore_weight * len(self.seen_coords) * 0.1 * current_explore_plus
+
+            # 2. 적립금(offset)에 추가 (이러면 총점은 유지됨)
+            self.exploration_offset += current_explore_val
+           
             # [핵심] 방문했던 좌표 기록을 싹 비웁니다.
             # 이제부터는 아는 길도 '초행길' 취급을 받아 점수를 줍니다.
             self.seen_coords = {} 
@@ -320,7 +368,6 @@ class GoldEnv(Env):
         self.update_map_progress()
         step_limit_reached = self.check_if_done()
         obs = self._get_obs()
-        self.step_count += 1
 
         # [수정됨] info에 '총 보상'과 '세부 보상 항목'을 모두 추가합니다.
         info = {
@@ -392,51 +439,51 @@ class GoldEnv(Env):
             }
         )
 
-    def start_video(self):
+    # def start_video(self):
 
-        if self.full_frame_writer is not None:
-            self.full_frame_writer.close()
-        if self.model_frame_writer is not None:
-            self.model_frame_writer.close()
-        if self.map_frame_writer is not None:
-            self.map_frame_writer.close()
+    #     if self.full_frame_writer is not None:
+    #         self.full_frame_writer.close()
+    #     if self.model_frame_writer is not None:
+    #         self.model_frame_writer.close()
+    #     if self.map_frame_writer is not None:
+    #         self.map_frame_writer.close()
 
-        base_dir = self.s_path / Path("rollouts")
-        base_dir.mkdir(exist_ok=True)
-        full_name = Path(
-            f"full_reset_{self.reset_count}_id{self.instance_id}"
-        ).with_suffix(".mp4")
-        model_name = Path(
-            f"model_reset_{self.reset_count}_id{self.instance_id}"
-        ).with_suffix(".mp4")
-        self.full_frame_writer = media.VideoWriter(
-            base_dir / full_name, (144, 160), fps=60, input_format="gray"
-        )
-        self.full_frame_writer.__enter__()
-        self.model_frame_writer = media.VideoWriter(
-            base_dir / model_name, self.output_shape[:2], fps=60, input_format="gray"
-        )
-        self.model_frame_writer.__enter__()
-        map_name = Path(
-            f"map_reset_{self.reset_count}_id{self.instance_id}"
-        ).with_suffix(".mp4")
-        self.map_frame_writer = media.VideoWriter(
-            base_dir / map_name,
-            (self.coords_pad * 4, self.coords_pad * 4),
-            fps=60, input_format="gray"
-        )
-        self.map_frame_writer.__enter__()
+    #     base_dir = self.s_path / Path("rollouts")
+    #     base_dir.mkdir(exist_ok=True)
+    #     full_name = Path(
+    #         f"full_reset_{self.reset_count}_id{self.instance_id}"
+    #     ).with_suffix(".mp4")
+    #     model_name = Path(
+    #         f"model_reset_{self.reset_count}_id{self.instance_id}"
+    #     ).with_suffix(".mp4")
+    #     self.full_frame_writer = media.VideoWriter(
+    #         base_dir / full_name, (144, 160), fps=60, input_format="gray"
+    #     )
+    #     self.full_frame_writer.__enter__()
+    #     self.model_frame_writer = media.VideoWriter(
+    #         base_dir / model_name, self.output_shape[:2], fps=60, input_format="gray"
+    #     )
+    #     self.model_frame_writer.__enter__()
+    #     map_name = Path(
+    #         f"map_reset_{self.reset_count}_id{self.instance_id}"
+    #     ).with_suffix(".mp4")
+    #     self.map_frame_writer = media.VideoWriter(
+    #         base_dir / map_name,
+    #         (self.coords_pad * 4, self.coords_pad * 4),
+    #         fps=60, input_format="gray"
+    #     )
+    #     self.map_frame_writer.__enter__()
 
-    def add_video_frame(self):
-        self.full_frame_writer.add_image(
-            self.render(reduce_res=False)[:, :, 0]
-        )
-        self.model_frame_writer.add_image(
-            self.render(reduce_res=True)[:, :, 0]
-        )
-        self.map_frame_writer.add_image(
-            self.get_explore_map()
-        )
+    # def add_video_frame(self):
+    #     self.full_frame_writer.add_image(
+    #         self.render(reduce_res=False)[:, :, 0]
+    #     )
+    #     self.model_frame_writer.add_image(
+    #         self.render(reduce_res=True)[:, :, 0]
+    #     )
+    #     self.map_frame_writer.add_image(
+    #         self.get_explore_map()
+    #     )
 
     def get_game_coords(self):
         # x, y, map_group, map_number
@@ -558,51 +605,51 @@ class GoldEnv(Env):
         # done = self.read_hp_fraction() == 0 # end game on loss
         return done
 
-    def save_and_print_info(self, done, obs):
-        if self.print_rewards:
-            prog_string = f"step: {self.step_count:6d}"
-            for key, val in self.progress_reward.items():
-                prog_string += f" {key}: {val:5.2f}"
-            prog_string += f" sum: {self.total_reward:5.2f}"
-            print(f"\r{prog_string}", end="", flush=True)
+    # def save_and_print_info(self, done, obs):
+    #     if self.print_rewards:
+    #         prog_string = f"step: {self.step_count:6d}"
+    #         for key, val in self.progress_reward.items():
+    #             prog_string += f" {key}: {val:5.2f}"
+    #         prog_string += f" sum: {self.total_reward:5.2f}"
+    #         print(f"\r{prog_string}", end="", flush=True)
 
-        if self.step_count % 50 == 0:
-            plt.imsave(
-                self.s_path / Path(f"curframe_{self.instance_id}.jpeg"),
-                self.render(reduce_res=False)[:, :, 0],
-            )
+    #     if self.step_count % 50 == 0:
+    #         plt.imsave(
+    #             self.s_path / Path(f"curframe_{self.instance_id}.jpeg"),
+    #             self.render(reduce_res=False)[:, :, 0],
+    #         )
 
-        if self.print_rewards and done:
-            print("", flush=True)
-            if self.save_final_state:
-                fs_path = self.s_path / Path("final_states")
-                fs_path.mkdir(exist_ok=True)
-                plt.imsave(
-                    fs_path
-                    / Path(
-                        f"frame_r{self.total_reward:.4f}_{self.reset_count}_explore_map.jpeg"
-                    ),
-                    obs["map"][:, :, 0],
-                )
-                plt.imsave(
-                    fs_path
-                    / Path(
-                        f"frame_r{self.total_reward:.4f}_{self.reset_count}_full_explore_map.jpeg"
-                    ),
-                    self.explore_map,
-                )
-                plt.imsave(
-                    fs_path
-                    / Path(
-                        f"frame_r{self.total_reward:.4f}_{self.reset_count}_full.jpeg"
-                    ),
-                    self.render(reduce_res=False)[:, :, 0],
-                )
+    #     if self.print_rewards and done:
+    #         print("", flush=True)
+    #         if self.save_final_state:
+    #             fs_path = self.s_path / Path("final_states")
+    #             fs_path.mkdir(exist_ok=True)
+    #             plt.imsave(
+    #                 fs_path
+    #                 / Path(
+    #                     f"frame_r{self.total_reward:.4f}_{self.reset_count}_explore_map.jpeg"
+    #                 ),
+    #                 obs["map"][:, :, 0],
+    #             )
+    #             plt.imsave(
+    #                 fs_path
+    #                 / Path(
+    #                     f"frame_r{self.total_reward:.4f}_{self.reset_count}_full_explore_map.jpeg"
+    #                 ),
+    #                 self.explore_map,
+    #             )
+    #             plt.imsave(
+    #                 fs_path
+    #                 / Path(
+    #                     f"frame_r{self.total_reward:.4f}_{self.reset_count}_full.jpeg"
+    #                 ),
+    #                 self.render(reduce_res=False)[:, :, 0],
+    #             )
 
-        if self.save_video and done:
-            self.full_frame_writer.close()
-            self.model_frame_writer.close()
-            self.map_frame_writer.close()
+    #     if self.save_video and done:
+    #         self.full_frame_writer.close()
+    #         self.model_frame_writer.close()
+    #         self.map_frame_writer.close()
 
     def read_m(self, addr):
         # return self.pyboy.get_memory_value(addr)
@@ -673,33 +720,92 @@ class GoldEnv(Env):
         # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         # 1. 현재 스펙 확인
+
+        current_exp_score = self.reward_scale * self.total_exp_reward * 0.1
+        current_dmg_score = self.reward_scale * self.total_dmg_reward * 0.05 # (원래 0.01 설정이면 유지)
+        current_level_score = self.reward_scale * self.get_levels_reward() * 5.0
+        current_heal_score = self.reward_scale * self.total_healing_rew * 2
+
         badge_count = self.get_badges()
         level_sum = self.get_levels_sum()
         
-        # 2. 성장 한계선 설정 (배지 0개면 30레벨, 1개면 45레벨...)
-        allowed_level_cap = 9 + (badge_count * 9)
+        # 2. 성장 한계선 설정 (배지 0개면 15레벨, 23/31/39/47/55/63/71
+        allowed_level_cap = 9 + (badge_count * 8)
         
-        # 3. 페널티 결정 (핵심 로직)
-        if level_sum > allowed_level_cap:
-            # "너 너무 세다. 이제 사냥 그만하고 딴 데 가라."
+        # =================================================================
+        # 🕵️‍♂️ [핵심 추가] 지금 누구랑 싸우고 있니?
+        # =================================================================
+        # 0xD116: 전투 타입 (0 비전투 / 1 야생 / 2 트레이너)
+        battle_type = self.read_m(0xD116)
+        is_trainer_battle = (battle_type == 2)
+
+        # =================================================================
+        # ⚖️ 레벨캡 패널티 적용 로직 (예외 처리 추가)
+        # =================================================================
+        # [조건 설명]
+        # 1. 레벨 총합이 한계선을 넘었고 (level_sum > allowed_level_cap)
+        # 2. AND, 지금 싸우는 게 트레이너가 아니라면 (not is_trainer_battle)
+        # -> 그때만 보상을 동결(0점)시킨다.
+
+        if level_sum > allowed_level_cap and not is_trainer_battle:
+            if not self.is_combat_frozen:
+                # 📸 처음 넘는 순간! 각각의 점수를 스냅샷으로 저장
+                self.exp_snapshot = current_exp_score - self.exp_deduction
+                self.dmg_snapshot = current_dmg_score - self.dmg_deduction
+                self.level_snapshot = current_level_score - self.level_deduction
+                self.heal_snapshot = current_heal_score - self.heal_deduction
+                self.is_combat_frozen = True
+            
+            # [핵심] 실제 점수가 오르는 족족 차감액(deduction)을 늘려버립니다.
+            # 목표: (curr_exp - new_deduction) 값이 항상 frozen_base와 같게 만듦.
+            self.exp_deduction = current_exp_score - self.exp_snapshot
+            self.dmg_deduction = current_dmg_score - self.dmg_snapshot 
+            self.level_deduction = current_level_score - self.level_snapshot
+            self.heal_deduction = current_heal_score - self.heal_snapshot
+
+            # # 🧊 보상으로는 '더 이상 오르지 않는 스냅샷 값'을 사용
+            # final_exp = self.exp_snapshot
+            # final_dmg = self.dmg_snapshot
+            # final_level = self.level_snapshot
+
             explore_plus = 5
-            grinding_penalty = 0
+
+        # [상황 B] 레벨캡 미만 or 배지 획득 (해제)
         else:
-            # "아직 약하네. 사냥 더 해라."
+            self.is_combat_frozen = False
+            # self.exp_snapshot = None
+            # self.dmg_snapshot = None
+            # self.level_snapshot = None
+
+            # [핵심] 여기서는 deduction을 업데이트하지 않습니다! (Freeze Deduction)
+            # 즉, 야생에서 쌓은 차감액은 그대로 유지하고, 
+            # 트레이너한테서 얻은 추가 점수만 반영됩니다.
+            
+            # # 🔥 동결 해제! 실제 점수가 그대로 반영됨 (밀린 보상 일시불 지급)
+            # final_exp = current_exp_score
+            # final_dmg = current_dmg_score
+            # final_level = current_level_score
+            
             explore_plus = 1
-            grinding_penalty = 1.0
+        
+        
+        # 4. 최종 점수 적용 (실제 점수 - 차감액)
+        final_exp = current_exp_score - self.exp_deduction
+        final_dmg = current_dmg_score - self.dmg_deduction
+        final_level = current_level_score - self.level_deduction
+        final_heal = current_heal_score - self.heal_deduction
 
         state_scores = {
             "event": self.reward_scale * self.update_max_event_rew() * 10,
-            "level": self.reward_scale * self.get_levels_reward() * 5.0 * grinding_penalty, 
-            "heal": self.reward_scale * self.total_healing_rew * 2,
+            "level": final_level, 
+            "heal": final_heal,
             #"op_lvl": self.reward_scale * self.update_max_op_level() * 0.2,
-            "exp": self.reward_scale * self.total_exp_reward * 0.1 * grinding_penalty,
-            "dead": self.reward_scale * self.died_count * -0.1,
+            "exp": final_exp,
+            "dead": self.reward_scale * self.died_count * -1,
             "badge": self.reward_scale * self.get_badges() * 20,
-            "explore": self.reward_scale * self.explore_weight * len(self.seen_coords) * 0.1 * explore_plus,
+            "explore": self.exploration_offset + self.reward_scale * self.explore_weight * len(self.seen_coords) * 0.1 * explore_plus,
             "stuck": self.reward_scale * self.get_current_coord_count_reward() * -0.05,
-            "dmg": self.reward_scale * self.total_dmg_reward * 0.05 * grinding_penalty
+            "dmg": final_dmg
         }
 
         return state_scores
