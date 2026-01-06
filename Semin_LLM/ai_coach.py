@@ -38,13 +38,13 @@ class LLMCoach:
 
         try:
             image_part = self._process_image(screen_array)
-            prompt = f"Context: {context_text}\nWhere am I? What to do next? Short advice."
+            prompt = f"Context: {context_text}\n"
 
             response = self.model.generate_content([image_part, prompt])
             return response.text.strip()
 
         except Exception as e:
-            print(f"⚠️ [Gemini] 조언 요청 실패: {e}")
+            print(f"LLM 조언 요청 실패: {e}")
             return None
 
     #LLM의 보상 조건을 관리하고 이유를 같이 설명하도록 함.
@@ -62,15 +62,17 @@ class LLMCoach:
             현재 화면을 보고 게임 진행 상황을 다음 채점 기준에 맞춰 평가해 줘.
 
             [채점 기준]:
-            - 0점: 구석에 갇혀 있거나, 의미 없는 행동 반복, 검은 화면.
-            - 2점: 탐험 중 (새로운 장소로 이동).
-            - 5점: 상호작용 (NPC 대화, 표지판 읽기, 아이템 줍기).
-            - 8점: 전투 중이거나 메뉴 조작 중.
+            - -5점: 한 마을에 4096스텝동안 머뭄.
+            - -2점: 구석에 갇혀 있거나, 의미 없는 행동 반복, 검은 화면.
+            - 1점: 탐험 중 (새로운 지역으로 이동).
+            - 1점: 상호작용 (NPC 대화, 표지판 읽기, 아이템 줍기).
+            - 3점: 풀숲에 있음.
+            - 5점: 전투를 하거나 포켓몬을 잡음.
             - 10점: 큰 성과 (전투 승리, 레벨업, 새로운 도시 도착, 중요 이벤트).
 
             Output must be strict JSON:
             {{
-                "score": <0~10 사이의 숫자>,
+                "score": <-5~10 사이의 숫자>,
                 "reason": "<점수를 준 이유를 한국어로 짧게 한 문장으로>"
             }}
             """

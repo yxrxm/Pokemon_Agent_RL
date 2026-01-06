@@ -38,7 +38,7 @@ class GoldEnv(gym.Env):
         #LLM AI 설정값
         ai_conf = config.get("ai_config", None)
         if ai_conf and ai_conf.get("use_ai_coach", False):
-            self.coach = ai_coach.GeminiCoach(ai_conf)
+            self.coach = ai_coach.LLMCoach(ai_conf)
             self.coach_interval = ai_conf["coach_interval"]
         else:
             self.coach = None
@@ -74,6 +74,51 @@ class GoldEnv(gym.Env):
         #관찰 공간 // 우리가 화면을 보듯이 AI가 보는 화면 규격 // PPO 정책에 사용함 obs(현재 화면)에 따라 미래 보상을 예측하여 행동함.
         self.observation_space = spaces.Box(low=0, high=255, shape=(3, 144, 160), dtype=np.uint8)
 
+    #AI와 commands.txt를 통해서 대화를 가능하게 함.
+    def check_command_file(self):
+        """
+        commands.txt 파일을 읽어서 명령이 있으면 수행하고 내용을 지움
+        """
+        cmd_file = "commands.txt"
+
+        #파일 존재 여부 확인
+        if not os.path.exists(cmd_file):
+            return
+
+        try:
+            with open(cmd_file, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+
+            #빈 내용은 제외
+            if not content:
+                return
+
+            print(f"명령 확인: {content}")
+
+            if content == "조언":
+                if self.coach:
+                    obs = self.get_observation()
+                    advice = self.coach.ask_advice(obs, "사용자가 직접 조언을 요청했어.")
+                    print(f" {advice}")
+                else:
+                    print("코치 없음.")
+
+            # elif content == "저장":
+            #     # 여기에 강제 저장 로직을 넣을 수도 있음 (지금은 로그만)
+            #     print("💾 (구현 예정) 현재 상태 강제 저장 요청됨!")
+            #
+            # elif content.startswith("배율"):
+            #     print(f"🔧 가중치 조절 명령: {content}")
+
+            #명령어 수행 후, 파일을 비우기
+            with open(cmd_file, "w", encoding="utf-8") as f:
+                f.write("")
+
+        #파일이 lock인 경우.
+        except Exception as e:
+            print(f"에러 발생 : {e}")
+            pass
+        
 #AI의 Step과 Step당의 Update 사항
     def step(self, action):
         self.step_count += 1
@@ -107,6 +152,7 @@ class GoldEnv(gym.Env):
         #2048 step당 보여줄 정보(Callback 함수) 용도
         info = {
             "badges": self.current_badge_count,
+            "step_count": self.step_count, #badge 개수 변화에 따라 스텝에 따른 저장 여부 판단용도
             "exploration": len(self.seen_coords),
             "level_sum": cur_level_sum,
             "deaths": self.death_count,
