@@ -295,7 +295,7 @@ class GoldEnv(gym.Env):
 
         # 만약 이 좌표가 내 기억(seen_coords)에 없다면? -> 새로운 땅이다!
         if curr_coord not in self.seen_coords:
-            r = 0.02 * weights.get("exploration", 1.0)  # 작은 보상을 줌 (티끌 모아 태산)
+            r = 0.01 * weights.get("exploration", 1.0)  # 작은 보상을 줌 (티끌 모아 태산)
             total_step_reward += r
             reward_details["explore"] += r
             # (중요) 보상을 줬으니 기록에 추가
@@ -336,12 +336,25 @@ class GoldEnv(gym.Env):
             total_step_reward += r
             reward_details["dead"] += r
 
-        #[Battle Win] 전투 승리 (전투 -> 필드 전환 & 내 체력 있음)
+        # [Battle Win] 전투 승리 수정판
+        # 조건: 전투가 끝났는데(전투->필드) + 적의 체력이 0이었거나 + 경험치가 올랐어야 함
         if self.prev_battle_type != 0 and cur_battle_type == 0:
-            if cur_hp > 0:
+            # 1. 진짜 승리 (적 체력이 0이 됨 OR 경험치를 얻음)
+            # (PyBoy 메모리 타이밍 이슈로 적 체력 0이 감지 안 될 수도 있으니 경험치 증가도 같이 봅니다)
+            if self.prev_enemy_hp == 0 or cur_exp > self.prev_exp:
                 r = 5.0 * weights.get("battle", 1.0)
                 total_step_reward += r
                 reward_details["battle"] += r
+                print("진짜 승리! (Battle Win)")
+
+            # 2. 도망침 (내 체력은 있는데 적 체력도 남아있고 경험치도 그대로임)
+            else:
+                total_step_reward -= 0.1
+                print("도망 패널티 (-0.1점)")
+                # 여기서 선택할 수 있습니다.
+                # 옵션 A: 그냥 보상 없음 (0점) -> 추천
+                # 옵션 B: 도망치지 말라고 약간의 감점 (-0.1점)
+                pass
 
         #[Heal] 회복 (전투 중 아닐 때 체력 증가)
         if cur_battle_type == 0 and cur_hp > self.prev_hp:
