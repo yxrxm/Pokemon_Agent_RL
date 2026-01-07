@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import json
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback, CallbackList
 import config
 
@@ -18,36 +19,44 @@ class MetricLoggingCallback(BaseCallback):
             return True
 
         # 1. 기본 통계 추출
-        badges = [info.get("badges", 0) for info in infos]
-        explorations = [info.get("exploration", 0) for info in infos]
-        level_sums = [info.get("level_sum", 0) for info in infos]
-        deaths = [info.get("deaths", 0) for info in infos]
-        heals = [info.get("heal", 0) for info in infos]  # 추가
+        badges = [info.get("game/badges", 0) for info in infos]
+        explorations = [info.get("game/exploration", 0) for info in infos]
+        level_sums = [info.get("game/level_sum", 0) for info in infos]
+        deaths = [info.get("game/deaths", 0) for info in infos]
 
-        # 2. 보상 상세 내역 추출 (GetReward에서 넘겨준 dict)
-        rew_badge = [info.get("reward_details", {}).get("badge", 0) for info in infos]
-        rew_gemini = [info.get("reward_details", {}).get("gemini", 0) for info in infos]
+        heals_battle = [info.get("game/heal_battle", 0) for info in infos]
+        heals_field = [info.get("game/heal_field", 0) for info in infos]
+        total_heals = [b + f for b, f in zip(heals_battle, heals_field)]
 
-        # [추가] 새로운 보상 로그
-        rew_battle = [info.get("reward_details", {}).get("battle", 0) for info in infos]
-        rew_exp = [info.get("reward_details", {}).get("exp", 0) for info in infos]
-        rew_dmg = [info.get("reward_details", {}).get("dmg", 0) for info in infos]
-        rew_dead = [info.get("reward_details", {}).get("dead", 0) for info in infos]
+        # 2. 보상 상세 내역 추출
+        # GoldEnv에서 "reward/badge" 등으로 보냅니다.
+        rew_badge = [info.get("reward/badge", 0) for info in infos]
+        rew_battle = [info.get("reward/battle", 0) for info in infos]
+        rew_exp = [info.get("reward/exp", 0) for info in infos]
+        rew_dmg = [info.get("reward/dmg", 0) for info in infos]
+        rew_dead = [info.get("reward/dead", 0) for info in infos]
+        rew_explore = [info.get("reward/explore", 0) for info in infos]  # 탐험 점수 추가
+        rew_penalty = [info.get("reward/penalty", 0) for info in infos]  # 패널티 점수 추가
+        rew_stuck = [info.get("reward/stuck", 0) for info in infos]
+        rew_gemini = [info.get("reward/gemini", 0) for info in infos]
 
-        # 3. 로거에 기록
+        # 3. 로거에 기록 (화면에 표시될 이름)
         self.logger.record("game/badges", np.mean(badges))
         self.logger.record("game/exploration", np.mean(explorations))
         self.logger.record("game/level_sum", np.mean(level_sums))
         self.logger.record("game/deaths", np.mean(deaths))
-        self.logger.record("game/heals", np.mean(heals))
+        self.logger.record("game/heals", np.mean(total_heals))
 
-        # 리워드 그래프 (학습 경향 확인용)
+        # 리워드 상세 기록
         self.logger.record("reward/badge", np.mean(rew_badge))
+        self.logger.record("reward/battle", np.mean(rew_battle))
+        self.logger.record("reward/exp", np.mean(rew_exp))
+        self.logger.record("reward/dmg", np.mean(rew_dmg))
+        self.logger.record("reward/dead", np.mean(rew_dead))
+        self.logger.record("reward/explore", np.mean(rew_explore))
+        self.logger.record("reward/penalty", np.mean(rew_penalty))
+        self.logger.record("reward/stuck", np.mean(rew_stuck))
         self.logger.record("reward/gemini", np.mean(rew_gemini))
-        self.logger.record("reward/battle", np.mean(rew_battle))  # 전투 승리
-        self.logger.record("reward/exp", np.mean(rew_exp))  # 경험치 획득
-        self.logger.record("reward/dmg", np.mean(rew_dmg))  # 딜링
-        self.logger.record("reward/dead", np.mean(rew_dead))  # 기절 패널티
 
         return True
 
@@ -83,8 +92,8 @@ class SpeedrunCallback(BaseCallback):
         for idx, info in enumerate(infos):
             # 환경에서 '현재 배지 수'와 '현재 에피소드 스텝 수'를 가져옴
             # 주의: GoldEnv의 info에 'step_count'가 있어야 합니다!
-            current_badge = info.get("badges", 0)
-            current_step = info.get("step_count", 0)
+            current_badge = info.get("game/badges", 0)
+            current_step = info.get("stats/step_count", 0)
 
             # 배지가 0개일 때는 굳이 저장 안 함 (원하면 포함 가능)
             if current_badge > 0:

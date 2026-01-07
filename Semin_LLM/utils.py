@@ -17,6 +17,7 @@ MEM_Y_POS = 0xD20E  # X 좌표
 
 # --- [C] 필드/파티 정보 (Field / Party Slot 1) ---
 # 전투가 아닐 때(필드) 관리하는 메인 포켓몬 정보
+PARTY_STRUCT_SIZE = 48
 # (독 데미지, 회복 감지용)
 MEM_PARTY_COUNT    = 0xDA22  # 파티에 있는 포켓몬 수
 MEM_PARTY_LEVELS = 0xDA49    # 파티 레벨 시작 주소 1번과 동일
@@ -24,6 +25,7 @@ MEM_P1_LEVEL       = 0xDA49  # 1번 포켓몬 레벨
 MEM_P1_HP          = 0xDA4C  # 1번 포켓몬 현재 체력 (Little Endian)
 MEM_P1_MAX_HP      = 0xDA4E  # 1번 포켓몬 최대 체력 (Little Endian)
 MEM_P1_EXP         = 0xDA32  # 1번 포켓몬 경험치 (3 Bytes, Big Endian)
+OFFSET_LEVEL = 0x1F
 
 # --- [D] 전투 전용 정보 (Active Battle Pokemon) ---
 # 전투 중에만 유효함. 교체를 해도 '현재 나와있는 놈'의 정보가 됨.
@@ -114,9 +116,12 @@ def get_level_sum(pyboy):
         party_count = read_uint8(pyboy, MEM_PARTY_COUNT)
         level_sum = 0
         # 파티 포켓몬 수만큼 루프를 돌며 레벨을 더함
+        current_addr = MEM_PARTY_LEVELS
+
         for i in range(party_count):
-            level = read_uint8(pyboy, MEM_PARTY_LEVELS + i)
+            level = read_uint8(pyboy, current_addr)
             level_sum += level
+            current_addr += PARTY_STRUCT_SIZE  # 다음 포켓몬 주소로 점프
         return level_sum
     except Exception:
         return 0
