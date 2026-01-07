@@ -6,7 +6,7 @@ from PIL import Image as PILImage
 
 # Google Vertex AI 관련 임포트
 import vertexai
-from vertexai.generative_models import GenerativeModel, Part, Image
+from vertexai.generative_models import GenerativeModel, Image
 
 
 class LLMCoach:
@@ -48,43 +48,60 @@ class LLMCoach:
             return None
 
     #LLM의 보상 조건을 관리하고 이유를 같이 설명하도록 함.
-    def evaluate_screen(self, screen_array, current_reward):
+    # [수정] game_status 인자를 추가했습니다. (기본값은 빈 딕셔너리)
+    def evaluate_screen(self, screen_array, current_reward, game_status={}):
         if not self.enabled:
             return 0.0, "AI Coach Disabled"
 
         try:
-            #게임 화면을 이미지 파일처럼 만듬.
+            # 1. 이미지 처리
             image_part = self._process_image(screen_array)
 
-            #나의 실제 채점 기준표 LLM이 이를 기반으로 적용하여 보상을 매김. 당연히 마이너스도 됨
+            # 2. [추가] 텍스트 정보(game_status)를 보기 좋게 문자열로 변환
+            # 예: "- HP: 20/20 \n - Battle Mode: No ..." 형태가 됩니다.
+            status_text = "\n".join([f"- {k}: {v}" for k, v in game_status.items()])
+
+            # 3. [수정] 프롬프트 보강 (이미지 + 텍스트 정보 + 현재 보상 상황)
             prompt = f"""
             너는 포켓몬 골드 버전 AI를 평가하는 심판이야.
-            현재 화면을 보고 게임 진행 상황을 다음 채점 기준에 맞춰 평가해 줘.
+            제공된 [게임 화면]과 [내부 데이터]를 종합해서 현재 상황을 판단해 줘.
+
+            [현재 게임 내부 데이터]:
+            {status_text}
+
+            [현재 스텝에서 받은 보상 합계]: {current_reward}
+
+            위 정보를 바탕으로 AI의 행동을 평가해 줘.
+            특히, 'HP가 없어서 치료를 잘했다'거나 '전투 중인데 도망쳤다' 같은 인과관계를 잘 봐줘.
 
             [채점 기준]:
-            - -5점: 한 마을에 4096스텝동안 머뭄.
-            - -2점: 구석에 갇혀 있거나, 의미 없는 행동 반복, 검은 화면.
-            - 1점: 탐험 중 (새로운 지역으로 이동).
-            - 1점: 상호작용 (NPC 대화, 표지판 읽기, 아이템 줍기).
-            - 3점: 풀숲에 있음.
-            - 5점: 전투를 하거나 포켓몬을 잡음.
-            - 10점: 큰 성과 (전투 승리, 레벨업, 새로운 도시 도착, 중요 이벤트).
+            - 0점: 별다른 성과 없음, 의미 없는 행동 반복.
+            - 5점: 전투 승리, 유의미한 탐험, 적절한 회복.
+            - 10점: 레벨업, 배지 획득, 새로운 마을 도착, 중요 이벤트 클리어.
+            - 감점(-1 ~ -5): HP가 꽉 찼는데 또 치료함(낭비), 벽에 막혀 제자리걸음.
 
             Output must be strict JSON:
             {{
-                "score": <-5~10 사이의 숫자>,
+                "score": <-5~10 사이의 숫자 (소수점 가능)>,
                 "reason": "<점수를 준 이유를 한국어로 짧게 한 문장으로>"
             }}
             """
 
-            #위 img와 prompt를 기반으로 실제 요청.
+            # 4. LLM 요청
             response = self.model.generate_content(
                 [image_part, prompt],
                 generation_config={"response_mime_type": "application/json"}
             )
 
-            #결과 받아와서 해석
-            result = json.loads(response.text)
+            # 5. [추가] 결과 파싱 안전장치 (마크다운 백틱 제거)
+            text_response = response.text.strip()
+
+            # 가끔 AI가 ```json { ... } ``` 형태로 줄 때가 있어서 이를 제거함
+            if text_response.startswith("```"):
+                text_response = text_response.strip("`").replace("json", "").strip()
+
+            # JSON 변환
+            result = json.loads(text_response)
 
             score = float(result.get("score", 0))
             reason = result.get("reason", "No reason provided")
@@ -93,7 +110,7 @@ class LLMCoach:
 
         except Exception as e:
             print(f"LLM 평가 실패: {e}")
-            # 에러 발생 시 0점과 에러 메시지 반환
+            # 에러 발생 시 0점 반환 (프로그램이 멈추지 않도록)
             return 0.0, f"Error: {e}"
 
     def _process_image(self, screen_array):

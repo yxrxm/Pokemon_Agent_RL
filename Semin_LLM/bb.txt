@@ -12,4 +12,13 @@ ai_coach.py에서 다양한 방법을 시도할 수 있음.
 evaluate_screen 법을 만드는 것.
 
 GoldEnv에서 dmg, heal, death, exp 변수를 추가해야함.
-그리고 ai_coach에서 보상 기준표를 변경을 좀 해야함.
+그리고 ai_coach에서 보상 기준표를 변경을 좀 해야함
+
+GoldEnv에 있는
+command 함수에서 좀 더 유동적으로 적용할 수 있게 할 지 생각 좀 해봐야 할 듯 함.
+
+Callback에 조금 더 추가하는 것이 좋을 듯 함.
+
+#텐서보드 사용법
+tensorboard --logdir="경로"
+tensorboard --logdir="C:\Users\hongs\OneDrive\문서\Desktop\111\PokeyProjectGoldVer\sessions\session_15\tensorboard_logs"

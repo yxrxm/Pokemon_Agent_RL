@@ -12,12 +12,12 @@ INIT_STATE_FILE = os.path.join(BASE_DIR, "game_file/init.state")
 #init.state는 pyboy 라이브러리를 통해서 만든 것이고 게임boy 파일로는 연동되지 않음.
 
 '''실제 변수들'''
-#보상변수의 가중치(PPO)를 설정할 수 있는 부분 // 뱃지의 개수에 따라 다른 가중치를 사용하기로 함.
+#보상변수의 가중치(PPO)를 설정할 수 있는 부분 // 뱃지의 개수에 따라 다른 가중치를 사용하기로 함. !!!
 REWARD_WEIGHTS = {
-    0: {"exploration": 1.0, "battle": 0.5, "level": 1.0, "gemini": 1.0},
-    1: {"exploration": 0.5, "battle": 2.0, "level": 2.0, "gemini": 2.0},
-    2: {"exploration": 0.2, "battle": 3.0, "level": 3.0, "gemini": 2.5},
-    "default": {"exploration": 0.2, "battle": 3.0, "level": 3.0, "gemini": 3.0}
+    0: { "exploration": 3, "battle": 5.0, "level": 3.0, "gemini": 1.0, "exp": 2.0, "dmg": 1.0, "heal": 1.0, "dead": 0.5 },
+    1: { "exploration": 0.5, "battle": 2.0, "level": 2.0, "gemini": 2.0, "exp": 1.5, "dmg": 1.5, "heal": 1.0, "dead": 1.5 },
+    2: { "exploration": 0.2, "battle": 3.0, "level": 3.0, "gemini": 2.5, "exp": 2.0, "dmg": 2.0, "heal": 1.0, "dead": 2.0 },
+    "default": { "exploration": 0.2, "battle": 3.0, "level": 3.0, "gemini": 3.0, "exp": 2.0, "dmg": 2.0, "heal": 1.0, "dead": 2.0 }
 }
 
 #기본 환경 변수
@@ -41,10 +41,10 @@ train_config = {
 
 #LLM 환경 변수
 ai_config = {
-    "use_ai_coach": True, #AI의 사용 여부, PPO를 도우기 위한 것이고 RL이 잘 되면 끄고 해도 됨.
+    "use_ai_coach": False, #AI의 사용 여부, PPO를 도우기 위한 것이고 RL이 잘 되면 끄고 해도 됨.
     "project_id": "", # 프로젝트 ID // 사용할 AI의 실제 ID
     "location": "us-central1", #미국 서버
-    "model_name": "",
+    "model_name": "models/gemini-2.0-flash-001",
     # model_name 인데, gemini 에서도 사용할 수 있는 model이 다르고 비용도 다름.
     "coach_interval": 512, #LLM을 몇 스텝마다 호출할 지.
     "key_path": "" #실제 AI 사용 키 json 파일

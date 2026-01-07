@@ -1,35 +1,45 @@
 import os
 import re
 
-# ==========================================
 # [메모리 주소 모음] (Memory Addresses)
 # 포켓몬 골드/실버 버전 (영문판) 기준
-# ==========================================
 
 # 1. 플레이어 상태
-MEM_MONEY = 0xD84E  # 돈 (3 bytes, BCD)
-MEM_BADGES = 0xD857  # 획득한 배지 플래그 (Johto)
-MEM_ID = 0xD1A3  # 트레이너 ID (2 bytes)
-MEM_NAME = 0xD158  # 트레이너 이름
+MEM_MONEY = 0xD573  # 돈 (BCD 포맷)
+MEM_BADGES = 0xD57C  # 획득한 배지 플래그 (Johto)
+MEM_BATTLE_TYPE = 0xD116  # 0:필드, 1:야생전투, 2:트레이너전투
 
 # 2. 위치 정보
-MEM_MAP_GROUP = 0xDCB5  # 현재 맵 그룹
-MEM_MAP_NUMBER = 0xDCB6  # 현재 맵 번호
-MEM_Y_POS = 0xDCB7  # Y 좌표
-MEM_X_POS = 0xDCB8  # X 좌표
+MEM_MAP_GROUP = 0xDA00  # 현재 맵 그룹
+MEM_MAP_NUMBER = 0xDA01  # 현재 맵 번호
+MEM_X_POS = 0xD20D  # Y 좌표
+MEM_Y_POS = 0xD20E  # X 좌표
 
-# 3. 파티(포켓몬) 정보
-MEM_PARTY_COUNT = 0xDCD7  # 현재 데리고 있는 포켓몬 수
-MEM_PARTY_LEVELS = 0xDCDF  # 파티 포켓몬들의 레벨 시작 지점 (순서대로 1바이트씩)
+# --- [C] 필드/파티 정보 (Field / Party Slot 1) ---
+# 전투가 아닐 때(필드) 관리하는 메인 포켓몬 정보
+# (독 데미지, 회복 감지용)
+MEM_PARTY_COUNT    = 0xDA22  # 파티에 있는 포켓몬 수
+MEM_PARTY_LEVELS = 0xDA49    # 파티 레벨 시작 주소 1번과 동일
+MEM_P1_LEVEL       = 0xDA49  # 1번 포켓몬 레벨
+MEM_P1_HP          = 0xDA4C  # 1번 포켓몬 현재 체력 (Little Endian)
+MEM_P1_MAX_HP      = 0xDA4E  # 1번 포켓몬 최대 체력 (Little Endian)
+MEM_P1_EXP         = 0xDA32  # 1번 포켓몬 경험치 (3 Bytes, Big Endian)
 
-# 4. 전투 관련
-MEM_BATTLE_TYPE = 0xD22D  # 0이면 필드, 0이 아니면 전투/메뉴 등
+# --- [D] 전투 전용 정보 (Active Battle Pokemon) ---
+# 전투 중에만 유효함. 교체를 해도 '현재 나와있는 놈'의 정보가 됨.
+# 주의: 이 영역의 HP는 Big Endian일 가능성이 높음.
+MEM_BATTLE_LEVEL   = 0xCB19
+MEM_BATTLE_HP_NOW  = 0xCB1C  # 현재 싸우는 포켓몬 HP (Big Endian 추정)
+MEM_BATTLE_HP_MAX  = 0xCB1E  # 현재 싸우는 포켓몬 Max HP
+
+# --- [E] 적 포켓몬 정보 (Enemy Battle Pokemon) ---
+MEM_ENEMY_LEVEL    = 0xD0FC
+MEM_ENEMY_HP       = 0xD0FF  # 적 HP (Big Endian 추정)
+MEM_ENEMY_MAX_HP   = 0xD101  # 적 Max HP
 
 
-# ==========================================
 # [도구 함수] (Helper Functions)
 # PyBoy 메모리 읽기 및 변환
-# ==========================================
 
 def read_uint8(pyboy, address):
     """
@@ -38,14 +48,38 @@ def read_uint8(pyboy, address):
     return pyboy.memory[address]
 
 
+#HP, 좌표 이런 것들은 덧셈/뺄셈의 효율 때문에 리틀 엔디안을 사용함.
 def read_uint16(pyboy, address):
     """
     2바이트(16비트) 정수를 읽어옵니다. (리틀 엔디안)
+    좌표, HP 등등은 Little Endian
     """
     low = pyboy.memory[address]
     high = pyboy.memory[address + 1]
     return (high << 8) + low
 
+def read_be16(pyboy, address):
+    """
+    2바이트(16비트) 정수를 읽어옵니다. (빅 엔디안 - Big Endian)
+    전투 중 HP, 적 HP 등은 Big Endian을 사용합니다.
+    """
+    high = pyboy.memory[address]
+    low = pyboy.memory[address + 1]
+    return (high << 8) | low
+
+#EXP, Money는 화면에 숫자를 보여주는 것이 중요해서 빅 엔디안을 사용함.
+def read_uint24(pyboy, address):
+    """3바이트 값 읽어서 정수로 변환 (빅 앤디안) // EXP, Money"""
+    try:
+        # Big Endian 방식 (앞주소가 큰 자릿수)
+        h = pyboy.memory[address]  # 가장 높은 자릿수 (High)
+        m = pyboy.memory[address + 1]  # 중간 자릿수 (Middle)
+        l = pyboy.memory[address + 2]  # 낮은 자릿수 (Low)
+
+        # 비트 시프트로 합치기
+        return (h << 16) | (m << 8) | l
+    except:
+        return 0
 
 def read_bcd(pyboy, address, length):
     """
@@ -63,7 +97,6 @@ def count_set_bits(value):
     이진수에서 1의 개수를 셉니다. (배지 개수 파악용)
     """
     return bin(value).count('1')
-
 
 def get_badges(pyboy):
     """
