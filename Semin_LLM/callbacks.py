@@ -38,7 +38,9 @@ class MetricLoggingCallback(BaseCallback):
         rew_explore = [info.get("reward/explore", 0) for info in infos]  # 탐험 점수 추가
         rew_penalty = [info.get("reward/penalty", 0) for info in infos]  # 패널티 점수 추가
         rew_stuck = [info.get("reward/stuck", 0) for info in infos]
+        rew_event = [info.get("reward/event", 0) for info in infos]
         rew_gemini = [info.get("reward/gemini", 0) for info in infos]
+
 
         # 3. 로거에 기록 (화면에 표시될 이름)
         self.logger.record("game/badges", np.mean(badges))
@@ -56,6 +58,8 @@ class MetricLoggingCallback(BaseCallback):
         self.logger.record("reward/explore", np.mean(rew_explore))
         self.logger.record("reward/penalty", np.mean(rew_penalty))
         self.logger.record("reward/stuck", np.mean(rew_stuck))
+        self.logger.record("reward/gemini", np.mean(rew_gemini))
+        self.logger.record("reward/event", np.mean(rew_event))
         self.logger.record("reward/gemini", np.mean(rew_gemini))
 
         return True

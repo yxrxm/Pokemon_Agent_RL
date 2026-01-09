@@ -2,7 +2,7 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
-
+from stable_baselines3.common.vec_env import VecVideoRecorder #화면 껐을 때 녹화용
 # 사용자 모듈 임포트
 import config
 import utils
@@ -58,6 +58,28 @@ if __name__ == "__main__":
         make_env(i, config.env_config, config.ai_config)
         for i in range(num_cpu)
     ])
+
+    # save_video
+    if config.env_config.get("save_video", False):
+        print("🎥 영상 녹화 기능이 활성화되었습니다.")
+
+        video_folder = os.path.join(current_session_path, "videos")
+        os.makedirs(video_folder, exist_ok=True)
+
+        # 영상 길이 (스텝 수)
+        video_length = 3000  # 약 1~2분 분량
+
+        # 녹화 빈도 (몇 스텝마다 녹화할지)
+        record_freq = 50_000
+
+        env = VecVideoRecorder(
+            env,
+            video_folder,
+            # x는 현재 총 스텝 수. 0이거나 record_freq 배수일 때 녹화 시작
+            record_video_trigger=lambda x: x == 0 or x % record_freq == 0,
+            video_length=video_length,
+            name_prefix="agent-video"
+        )
 
     #3. 모델 로드(커리큘럼 이어하기 로직)
     best_model_path, start_badge = utils.get_best_badge_model(config.MODELS_DIR)

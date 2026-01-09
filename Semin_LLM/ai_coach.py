@@ -31,6 +31,28 @@ class LLMCoach:
                 print("   -> key_path 경로와 프로젝트 ID를 확인하세요.")
                 self.enabled = False #AI 없어도 실행가능하게 함.
 
+    #LLM용 정지 화면 판독기
+    def _calculate_static_score(self, recent_frames):
+        """
+        recent_frames: 이미지 리스트 (최대 20장)
+        """
+        if not recent_frames or len(recent_frames) < 5:
+            return 0.0
+
+        total_variation = 0.0
+
+        # 인접한 프레임 간 차이 계산
+        for i in range(len(recent_frames) - 1):
+            curr_frame = recent_frames[i].astype(np.float32)
+            next_frame = recent_frames[i + 1].astype(np.float32)
+            diff = np.mean(np.abs(next_frame - curr_frame))
+            total_variation += diff
+
+        avg_change = total_variation / (len(recent_frames) - 1)
+        print(f">>> [화면 변화량 체크] 값: {avg_change:.6f} (정지기준: 0.3, 활발하지X 기준: 5)")
+
+        return avg_change
+
     #게임 실행 도중에 LLM과 대화를 가능하게 함
     def ask_advice(self, screen_array, context_text=""):
         if not self.enabled:
@@ -49,11 +71,24 @@ class LLMCoach:
 
     #LLM의 보상 조건을 관리하고 이유를 같이 설명하도록 함.
     # [수정] game_status 인자를 추가했습니다. (기본값은 빈 딕셔너리)
-    def evaluate_screen(self, screen_array, current_reward, game_status={}):
+    def evaluate_screen(self, screen_array, current_reward, game_status={}, recent_frames=None):
         if not self.enabled:
             return 0.0, "AI Coach Disabled"
 
         try:
+
+            static_warning = ""
+
+            if recent_frames:
+                static_score = self._calculate_static_score(recent_frames)
+
+                if static_score <= 0.3:
+                    static_warning = "\n화면이 정지해 있습니다."
+                elif static_score <= 5:
+                    static_warning = "\nAI가 활발하게 움직이지 않습니다."
+                else:
+                    static_warning = "\nAI가 활발하게 움직이고 있습니다."
+
             # 1. 이미지 처리
             image_part = self._process_image(screen_array)
 
@@ -68,17 +103,17 @@ class LLMCoach:
 
             [현재 게임 내부 데이터]:
             {status_text}
+            {static_warning}
 
             [현재 스텝에서 받은 보상 합계]: {current_reward}
 
-            위 정보를 바탕으로 AI의 행동을 평가해 줘.
-            특히, 'HP가 없어서 치료를 잘했다'거나 '전투 중인데 도망쳤다' 같은 인과관계를 잘 봐줘.
+            위 정보도 활용해서 AI의 행동을 평가해 줘.
 
             [채점 기준]:
-            - 0점: 별다른 성과 없음, 의미 없는 행동 반복.
-            - 5점: 전투 승리, 유의미한 탐험, 적절한 회복.
-            - 10점: 레벨업, 배지 획득, 새로운 마을 도착, 중요 이벤트 클리어.
-            - 감점(-1 ~ -5): HP가 꽉 찼는데 또 치료함(낭비), 벽에 막혀 제자리걸음.
+            - 가점(+0.01점): 현재 게임 내부 데이터가 "AI가 활발하게 움직이고 있습니다."인 경우
+            - 감점(-0.5점): 현재 게임 내부 데이터가 "AI가 활발하게 움직이지 않습니다."인 경우
+            - 감점(-1점): 현재 게임 내부 데이터가 "화면이 정지해 있습니다."인 경우이고 전투 중에서 멈춘 경우
+            - 감점(-3점): 현재 게임 내부 데이터가 "화면이 정지해 있습니다."인 경우이고 전투가 아닌 화면에서 멈춘 경우
 
             Output must be strict JSON:
             {{

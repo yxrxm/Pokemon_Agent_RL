@@ -15,6 +15,7 @@ class GoldEnv(gym.Env):
     def __init__(self, config):
         super(GoldEnv, self).__init__()
 
+        self.render_mode = "rgb_array"
         #기본 설정값
         self.config = config
         self.save_video = config.get("save_video", False)
@@ -50,7 +51,13 @@ class GoldEnv(gym.Env):
         self.steps_on_map = 0 #현재 맵에서 보낸 시간
         self.prev_map_id = -1 #이전 맵 ID (맵 변경 감지용)
         self.coord_history = deque(maxlen=100) #최근 100스텝 좌표 저장 // **AI 무기력 문제 발생**
-        
+        # [NEW] 최근 화면 이미지 10개를 저장할 변수 (메모리 절약을 위해 maxlen=10)
+        #AI 무기력문제를 LLM으로 해결하기 위한 변수
+        self.recent_frames = deque(maxlen=20)
+
+        #이벤트 상태 저장 변수 추가
+        self.prev_event_sum = 0
+
         #LLM AI 설정값
         ai_conf = config.get("ai_config", None)
         if ai_conf and ai_conf.get("use_ai_coach", False):
@@ -199,8 +206,11 @@ class GoldEnv(gym.Env):
         # 현재 게임화면을 담아옴 (Observation)
         obs = self.GetObs()
 
+        #최근 screen 장면을 받아옴.
+        self.recent_frames.append(obs.copy()) #obs하면 주소만 저장됨
+
         # 보상 업데이트 (Reward)
-        reward, reward_details = self.GetReward()
+        reward, reward_details = self.GetReward(action)
         self.total_reward += reward
 
         # 게임의 목표달성 여부
@@ -239,7 +249,7 @@ class GoldEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def GetReward(self):
+    def GetReward(self, action):
         """
         [통합 보상 함수]
         기존 기능: 가중치 시스템, 제자리/시간초과 감점, LLM 보상, 배지 보상
@@ -293,23 +303,32 @@ class GoldEnv(gym.Env):
 
         #시간 지체 패널티 추가
         # 매 스텝마다 조금씩 감점하여 AI가 빨리 움직이도록 강제함
-
-        penalty = -0.00001
-        total_step_reward += penalty
-        reward_details["penalty"] += penalty
+        # penalty = -0.00001
+        # total_step_reward += penalty
+        # reward_details["penalty"] += penalty
 
         # =================================================================
-        # [NEW] Stuck (고착 상태) 패널티 적용
+        # [NEW] 벽 박치기(Wall Hit) 패널티 적용
         # =================================================================
-        # 1. 아까 만든 함수를 호출해서, 내가 여기 얼마나 오래 있었는지(count) 가져옵니다.
-        stuck_count = self.get_current_coord_count_reward()
 
-        # 2. 오래 있었을수록 패널티를 세게 때립니다.
-        # 예: 처음 옴(1) -> -0.005점 (거의 없음)
-        # 예: 100번째 있음(100) -> -0.5점 (매우 아픔! 빨리 탈출해야 함)
-        stuck_penalty = stuck_count * -0.0001
+        stuck_penalty = 0
+        # self.valid_actions 인덱스 기준:
+        # 0:Down, 1:Left, 2:Right, 3:Up (이동 키)
+        # 4:A, 5:B (상호작용 키 - 이건 제자리여도 괜찮음)
 
-        # 3. 점수 반영
+        # 조건 1: 키를 눌렀는가? (action < 6)
+        # 조건 2: 기록이 2개 이상인가? (비교할 이전 좌표가 있어야 함)
+        if cur_battle_type == 0:
+            if action < 6 and len(self.coord_history) >= 2:
+                current_pos = self.coord_history[-1]  # 방금 이동한 후 좌표
+                prev_pos = self.coord_history[-2]  # 이동 전 좌표
+
+                # 조건 3: 키를 눌렀는데 좌표가 토씨 하나 안 바뀌었나?
+                if current_pos == prev_pos:
+                    # 벽에 박았으므로 패널티 부여!
+                    stuck_penalty = -0.001  # -0.01 정도면 꽤 따끔합니다.
+
+        # 점수 반영
         total_step_reward += stuck_penalty
         reward_details["stuck"] += stuck_penalty
 
@@ -317,6 +336,28 @@ class GoldEnv(gym.Env):
         reward_weights = self.config.get("reward_weights", {})
         weights = reward_weights.get(cur_badges, reward_weights.get("default", {}))
 
+        # =================================================================
+        # [NEW] 이벤트 플래그 보상 로직
+        # =================================================================
+        # 1. 현재 이벤트 총합 계산
+        cur_event_sum = utils.get_all_events_sum(self.pyboy)
+
+        # 2. 이전보다 늘어났는지 확인
+        if cur_event_sum > self.prev_event_sum:
+            diff = cur_event_sum - self.prev_event_sum
+
+            # 3. 보상 계산 (변화량 * 기본10점 * 가중치)
+            # 이벤트는 중요하므로 기본 점수를 10.0으로 설정
+            r = diff * 10.0 * weights.get("event", 1.0)
+
+            total_step_reward += r
+            reward_details["event"] += r
+
+            # 로그 출력
+            print(f"이벤트 발생! ({self.prev_event_sum} -> {cur_event_sum}) +{r:.2f}")
+
+            # 상태 업데이트
+            self.prev_event_sum = cur_event_sum
         #패널티 로직
         # # (1) 한 맵에 너무 오래 머무름  **동일하게 AI 무기력 문제 발생**
         # if self.steps_on_map > 4096:
@@ -379,6 +420,11 @@ class GoldEnv(gym.Env):
             reward_details["explore"] += r
             # (중요) 보상을 줬으니 기록에 추가
             self.seen_coords.add(curr_coord)
+        else: #새로운 땅이 아닌 경우
+            r = 0.0002 * weights.get("exploration", 1.0)
+            total_step_reward -= r
+            reward_details["explore"] -= r
+            
 
         # # [Explore] 새로운 맵 진입 **기존 코드**
         # if cur_map_id != self.prev_map_id:
@@ -405,7 +451,7 @@ class GoldEnv(gym.Env):
         if self.prev_battle_type != 0 and cur_battle_type != 0:
             if self.prev_enemy_hp > cur_enemy_hp:
                 dmg = self.prev_enemy_hp - cur_enemy_hp
-                r = dmg * 0.001 * weights.get("battle", 1.0)
+                r = dmg * 0.001 * weights.get("dmg", 1.0)
                 total_step_reward += r
                 reward_details["dmg"] += r
 
@@ -445,8 +491,8 @@ class GoldEnv(gym.Env):
                 total_step_reward += r
                 reward_details["heal"] += r
                 self.heal_battle_count += 1
-            #필드일 때
-            elif cur_battle_type == 0:
+            #필드일 때 -> 이전 체력이 0보다 클 때만 인정 (부활 시에도 인정을 해버리는 문제 때문에)
+            elif cur_battle_type == 0 and self.prev_hp > 0:
                 diff = cur_hp - self.prev_hp
                 r = diff * 0.01 * weights.get("heal", 1.0)
                 total_step_reward += r
@@ -475,7 +521,7 @@ class GoldEnv(gym.Env):
             }
             # ----------------------------------------
             # LLM에게 현재까지의 상황과 점수를 주고 평가받음
-            raw_score, reason = self.coach.evaluate_screen(obs, total_step_reward, game_status)
+            raw_score, reason = self.coach.evaluate_screen(obs, total_step_reward, game_status, list(self.recent_frames))
 
             if raw_score != 0:
                 bonus = raw_score * weights.get("gemini", 1.0)
@@ -525,6 +571,7 @@ class GoldEnv(gym.Env):
         self.steps_on_map = 0
         self.prev_map_id = -1
         self.coord_history.clear()
+        self.recent_frames.clear()
 
         self.death_count = 0
         self.heal_battle_count = 0
@@ -555,6 +602,12 @@ class GoldEnv(gym.Env):
             grp = self.pyboy.memory[utils.MEM_MAP_GROUP]
             num = self.pyboy.memory[utils.MEM_MAP_NUMBER]
             self.prev_map_id = (grp << 8) | num
+
+            try:
+                self.prev_event_sum = utils.get_all_events_sum(self.pyboy)
+            except Exception:
+                self.prev_event_sum = 0
+
         except Exception as e:
             print(f"Reset Error (Init variables set to 0): {e}")
             self.prev_money = 0
@@ -580,6 +633,14 @@ class GoldEnv(gym.Env):
 
         # 예: 처음 방문이면 1, 계속 벽에 박고 있어서 100번 다 여기였으면 100
         return count
+
+    def render(self):
+        if self.render_mode == "rgb_array":
+            # PyBoy 화면 가져오기 (세로, 가로, RGBA)
+            screen = self.pyboy.screen.ndarray
+            # 투명도(Alpha) 채널 제거하고 RGB만 반환 (세로, 가로, 3)
+            return screen[:, :, :3]
+        return None
 
     def close(self):
         #파이썬 프로그램을 끌 때 실행.

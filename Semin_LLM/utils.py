@@ -203,3 +203,24 @@ def get_best_badge_model(directory):
                 best_model_path = os.path.join(directory, filename)
 
     return best_model_path, max_badge
+
+
+def get_all_events_sum(pyboy):
+    """
+    0xD7B7 ~ 0xD8B6 구간의 모든 이벤트 플래그 비트 합(1의 개수)을 셉니다.
+    스토리 진행도(체육관, 아이템 획득, NPC 대화 등)를 파악하는 핵심 지표입니다.
+    """
+    # 이벤트 플래그 메모리 범위
+    START_ADDR = 0xD7B7
+    END_ADDR = 0xD8B6
+
+    total_events = 0
+
+    # 범위 내의 모든 바이트를 순회
+    for addr in range(START_ADDR, END_ADDR + 1):
+        # 메모리 값 읽기 (0~255)
+        val = pyboy.memory[addr]
+        # 켜진 비트 수 세기 (예: 00000011 -> 2)
+        total_events += bin(val).count('1')
+
+    return total_events
