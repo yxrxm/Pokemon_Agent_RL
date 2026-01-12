@@ -1,0 +1,169 @@
+import os
+import numpy as np
+import json
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback, CallbackList
+import config
+
+
+# class MetricLoggingCallback(BaseCallback):
+#     """
+#     사용자 정의 지표(탐험 수, 레벨 합, 보상 상세)를 Tensorboard 및 콘솔 표에 기록하는 콜백
+#     """
+
+#     def __init__(self, verbose=0):
+#         super(MetricLoggingCallback, self).__init__(verbose)
+
+#     def _on_step(self) -> bool:
+#         infos = self.locals.get("infos", [])
+#         if not infos:
+#             return True
+
+#         # 1. 기본 통계 추출
+#         badges = [info.get("game/badges", 0) for info in infos]
+#         explorations = [info.get("game/exploration", 0) for info in infos]
+#         level_sums = [info.get("game/level_sum", 0) for info in infos]
+#         deaths = [info.get("game/deaths", 0) for info in infos]
+
+#         heals_battle = [info.get("game/heal_battle", 0) for info in infos]
+#         heals_field = [info.get("game/heal_field", 0) for info in infos]
+#         total_heals = [b + f for b, f in zip(heals_battle, heals_field)]
+
+#         # 2. 보상 상세 내역 추출
+#         # GoldEnv에서 "reward/badge" 등으로 보냅니다.
+#         rew_badge = [info.get("reward/badge", 0) for info in infos]
+#         rew_battle = [info.get("reward/battle", 0) for info in infos]
+#         rew_exp = [info.get("reward/exp", 0) for info in infos]
+#         rew_dmg = [info.get("reward/dmg", 0) for info in infos]
+#         rew_dead = [info.get("reward/dead", 0) for info in infos]
+#         rew_explore = [info.get("reward/explore", 0) for info in infos]  # 탐험 점수 추가
+#         rew_penalty = [info.get("reward/penalty", 0) for info in infos]  # 패널티 점수 추가
+#         rew_stuck = [info.get("reward/stuck", 0) for info in infos]
+#         rew_gemini = [info.get("reward/gemini", 0) for info in infos]
+
+#         # 3. 로거에 기록 (화면에 표시될 이름)
+#         self.logger.record("game/badges", np.mean(badges))
+#         self.logger.record("game/exploration", np.mean(explorations))
+#         self.logger.record("game/level_sum", np.mean(level_sums))
+#         self.logger.record("game/deaths", np.mean(deaths))
+#         self.logger.record("game/heals", np.mean(total_heals))
+
+#         # 리워드 상세 기록
+#         self.logger.record("reward/badge", np.mean(rew_badge))
+#         self.logger.record("reward/battle", np.mean(rew_battle))
+#         self.logger.record("reward/exp", np.mean(rew_exp))
+#         self.logger.record("reward/dmg", np.mean(rew_dmg))
+#         self.logger.record("reward/dead", np.mean(rew_dead))
+#         self.logger.record("reward/explore", np.mean(rew_explore))
+#         self.logger.record("reward/penalty", np.mean(rew_penalty))
+#         self.logger.record("reward/stuck", np.mean(rew_stuck))
+#         self.logger.record("reward/gemini", np.mean(rew_gemini))
+
+#        return True
+# 수정
+class MetricLoggingCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        if not infos:
+            return True
+
+        info = infos[0]   # SubprocVecEnv → 첫 환경만 봐도 충분
+
+        # === Game stats ===
+        self.logger.record("game/badges", info.get("game/badges", 0))
+        self.logger.record("game/exploration", info.get("game/exploration", 0))
+        self.logger.record("game/unique_maps", info.get("game/unique_maps", 0))
+        self.logger.record("game/current_map_id", info.get("game/current_map_id", 0))
+        self.logger.record("stats/step_count", info.get("stats/step_count", 0))
+        self.logger.record("stats/total_reward", info.get("stats/total_reward", 0))
+
+        # === Rewards (Stage 1) ===
+        self.logger.record("reward/explore", info.get("reward/explore", 0))
+        self.logger.record("reward/time_penalty", info.get("reward/time_penalty", 0))
+        self.logger.record("reward/stuck_penalty", info.get("reward/stuck_penalty", 0))
+        self.logger.record("reward/badge", info.get("reward/badge", 0))
+
+        return True
+
+
+class SpeedrunCallback(BaseCallback):
+    """
+    각 배지 도달 시 '최소 스텝'을 갱신했을 때만 모델을 저장하는 콜백
+    """
+
+    def __init__(self, save_path: str, verbose=1):
+        super(SpeedrunCallback, self).__init__(verbose)
+        self.save_path = save_path
+        self.record_file = os.path.join(save_path, "speedrun_records.json")
+
+        # [0 ~ 16] 배지별 최소 스텝 기록 (초기값은 무한대)
+        # 파일이 있으면 불러오고, 없으면 새로 만듭니다.
+        if os.path.exists(self.record_file):
+            with open(self.record_file, "r") as f:
+                self.best_steps = {int(k): v for k, v in json.load(f).items()}
+            if verbose > 0:
+                print(f"📖 [Speedrun] 기존 기록을 불러왔습니다: {self.best_steps}")
+        else:
+            self.best_steps = {i: float('inf') for i in range(17)}  # 배지 0~16개
+
+    def _save_records(self):
+        """현재 최고 기록을 JSON 파일로 저장"""
+        with open(self.record_file, "w") as f:
+            json.dump(self.best_steps, f, indent=4)
+
+    def _on_step(self) -> bool:
+        # VecEnv에서는 infos가 리스트로 옵니다.
+        infos = self.locals.get("infos", [])
+
+        for idx, info in enumerate(infos):
+            # 환경에서 '현재 배지 수'와 '현재 에피소드 스텝 수'를 가져옴
+            # 주의: GoldEnv의 info에 'step_count'가 있어야 합니다!
+            current_badge = info.get("game/badges", 0)
+            current_step = info.get("stats/step_count", 0)
+
+            # 배지가 0개일 때는 굳이 저장 안 함 (원하면 포함 가능)
+            if current_badge > 0:
+                # 🏆 신기록 달성 체크 (작을수록 좋음)
+                if current_step < self.best_steps.get(current_badge, float('inf')):
+
+                    old_record = self.best_steps.get(current_badge, float('inf'))
+                    self.best_steps[current_badge] = current_step  # 기록 갱신
+                    self._save_records()  # 파일에도 기록
+
+                    if self.verbose > 0:
+                        diff = old_record - current_step if old_record != float('inf') else 0
+                        print(f"⚡ [NEW RECORD] 배지 {current_badge}개 달성! (Env {idx})")
+                        print(f"   ㄴ 기존: {old_record} -> 신규: {current_step} steps (단축: {diff})")
+
+                    # 모델 저장 (파일명에 스텝 수 포함)
+                    # 예: best_badge_1_step_5020.zip
+                    model_name = f"best_badge_{current_badge}_step_{current_step}"
+                    save_path = os.path.join(self.save_path, model_name)
+                    self.model.save(save_path)
+
+                    if self.verbose > 0:
+                        print(f"   💾 모델 저장 완료: {model_name}.zip")
+
+        return True
+
+
+def get_callbacks(checkpoint_dir):
+    #10000스텝마다, rl_model 정책 저장.
+    checkpoint_callback = CheckpointCallback(
+        save_freq=10000,
+        save_path=checkpoint_dir,
+        name_prefix="rl_model"
+    )
+
+    speedrun_callback = SpeedrunCallback(
+        save_path=config.MODELS_DIR,
+        verbose=1
+    )
+
+    #텐서보드용 로깅 롤백
+    logging_callback = MetricLoggingCallback()
+    
+    #리스트로 묶어서 반환 --> main.py의 model.learn에 줌.
+    return CallbackList([checkpoint_callback, speedrun_callback, logging_callback])
