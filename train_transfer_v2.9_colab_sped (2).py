@@ -75,6 +75,7 @@ class GameStatsCallback(BaseCallback):
         r_exp = []
         r_heal = []
         r_dmg = []
+        r_stuck = []
 
         # 2. 12개 환경을 순회하며 데이터 수집
         for info in infos:
@@ -92,6 +93,7 @@ class GameStatsCallback(BaseCallback):
                 r_exp.append(info["reward_exp"])
                 r_heal.append(info["reward_heal"])
                 r_dmg.append(info["reward_dmg"])
+                r_stuck.append(info["reward_stuck"])
 
         # 3. 데이터가 모였으면 '평균'을 내서 기록 (np.mean 사용)
         if total_rewards:
@@ -108,12 +110,14 @@ class GameStatsCallback(BaseCallback):
             self.logger.record("reward/exp", np.mean(r_exp))
             self.logger.record("reward/heal", np.mean(r_heal))
             self.logger.record("reward/dmg", np.mean(r_dmg))
+            self.logger.record("reward/stuck", np.mean(r_stuck))
 
             self.logger.record("game/badges_max", np.max(badges))
             self.logger.record("game/level_sum_max", np.max(level_sums))
             self.logger.record("game/exploration_max", np.max(explores)) # 가장 멀리 간 놈!
             self.logger.record("reward/event_max", np.max(r_event))
             self.logger.record("reward/total_max", np.max(total_rewards)) # 점수 제일 높은 놈
+            self.logger.record("reward/stuck_min", np.min(r_stuck)) # 제일 stuck 패널티 많이 받은 놈!
             
         return True
 
@@ -143,7 +147,7 @@ class VideoRecorderCallback(BaseCallback):
         self.record_config['instance_id'] = 'recorder'
         
         # [설정] 녹화할 길이 (프레임 수)
-        self.record_length = 5000 
+        self.record_length = 100000
         self.record_config['max_steps'] = self.record_length + 1000 
 
     def _on_step(self) -> bool:
@@ -285,7 +289,7 @@ if __name__ == '__main__':
     if target_weights:
         print(f"🔄 [이어하기] 최신 체크포인트 발견: {target_weights}")
         is_resume = True
-        unfreeze_step = 100_000 
+        unfreeze_step = 0
     elif os.path.exists(base_red_path):
         print(f"🆕 [전이학습] Red 버전 가중치 로드")
         target_weights = base_red_path
@@ -301,7 +305,7 @@ if __name__ == '__main__':
         'early_stop': False,
         'action_freq': 24, 
         'init_state': './init.state', 
-        'max_steps': 4096 * 24,
+        'max_steps': 40960 * 24,
         'print_rewards': True, 
         'save_video': False, 
         'fast_video': True,
@@ -312,7 +316,7 @@ if __name__ == '__main__':
         'extra_buttons': False
     }
 
-    num_cpu = min(os.cpu_count(), 12) 
+    num_cpu = min(os.cpu_count(), 8) 
     print(f"⚙️ 설정된 병렬 환경 개수: {num_cpu}")
     env = SubprocVecEnv([make_env(i, env_config) for i in range(num_cpu)])
 
@@ -321,14 +325,14 @@ if __name__ == '__main__':
         env,
         verbose=1,
         tensorboard_log=log_dir,
-        learning_rate=0.00008, # [최적화] 학습률 4e-05
-        n_steps=2048, # ----------------------------------------------------- 로그 찍히는거 빨리 하려고 수정함 원래 4096
+        learning_rate=0.00008, # [최적화] 학습률 8e-05
+        n_steps=4096, # ----------------------------------------------------- 로그 찍히는거 빨리 하려고 수정함 원래 4096
         batch_size=128, 
         n_epochs=10, 
         gamma=0.997, 
         gae_lambda=0.95, 
         clip_range=0.2, 
-        ent_coef=0.02, 
+        ent_coef=0.02, # 0.02
     )
 
     # if target_weights:
@@ -344,7 +348,7 @@ if __name__ == '__main__':
             # 주의: PPO.load는 새로운 모델 객체를 반환하므로 model 변수에 다시 담아야 합니다.
             # custom_objects는 혹시 모를 버전 호환성 등을 위해 필요할 수 있습니다.
             #model = PPO.load(target_weights, env=env) #----------------------------------------- 로그 찍히는거 빨리 하려고 수정함//
-            model = PPO.load(target_weights, env=env, n_steps=2048, batch_size=128)
+            model = PPO.load(target_weights, env=env, n_steps=4096, batch_size=128, learning_rate=0.00025, ent_coef=0.03) # 애가 너무 멍청해서 learning_rate=0.00008 에서 0.00025로 수정해봄 ent_coef는 0.02에서 0.03.
             
         else:
             # ✅ 전이학습 (Red -> Gold): 사용자 정의 함수 사용 (눈만 이식)
@@ -363,7 +367,7 @@ if __name__ == '__main__':
     
     callbacks = CallbackList([
         CheckpointCallback(save_freq=save_freq, save_path=log_dir, name_prefix=f'gold_{sess_id}'),
-        VideoRecorderCallback(env_config, save_freq=save_freq, log_dir=log_dir), # ------------------------------------------- 영상 녹화 기능. 빠른 학습을 위해 일단 꺼둠.
+        # VideoRecorderCallback(env_config, save_freq=save_freq, log_dir=log_dir), # ------------------------------------------- 영상 녹화 기능. 빠른 학습을 위해 일단 꺼둠.
         
         # [추가] 우리가 만든 게임 스탯 로거
         GameStatsCallback(), 

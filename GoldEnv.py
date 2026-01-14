@@ -146,6 +146,10 @@ class GoldEnv(Env):
         self.last_enemy_hp = 0  # 적의 이전 체력 기억
         self.has_reset_exploration = False # 도감 이벤트 때 탐험 리셋 했나요?
         self.exploration_offset = 0.0 # 도감을 받을 때 탐험 점수 저장 변수
+        self.exploration_base = 0.0 # 레벨업 시 탐험 저장 변수
+
+        self.exploration_first = 0.0
+        self.exploration_end = 0.0
 
         self.exp_snapshot = None
         self.dmg_snapshot = None
@@ -158,7 +162,28 @@ class GoldEnv(Env):
         self.level_deduction = 0.0
         self.heal_deduction = 0.0
 
+        self.level_gap = 0
+
         self.is_combat_frozen = False # 전투 관련 리워드 동결됐냐?
+
+        # 매 스텝 시 오른 exp를 구하기 위한 변수
+        self.total_exp_reward_last = 0.0 # 지난 토탈 exp
+        self.total_exp_reward_current = 0.0 # 이번에 오른 exp
+        self.current_exp_score = 0.0 # 
+
+        # 매 스텝 시 오른 dmg를 구하기 위한 변수
+        self.total_dmg_reward_last = 0.0 # 지난 토탈 dmg
+        self.total_dmg_reward_current = 0.0 # 이번에 오른 dmg
+        self.current_dmg_score = 0.0 # 
+
+        # # 굴착기용 변수
+        # self.idle_memory_snapshot = None # 평상시 메모리 저장소
+        # self.candidates = []             # 찾은 후보 주소들
+        # self.scan_complete = False       # 스캔 완료 여부
+
+        self.step_talking = 0
+        self.stuck_raw = 0.0
+        self.countt = 0
 
     def reset(self, seed=None, options={}):
         self.seed = seed
@@ -195,6 +220,7 @@ class GoldEnv(Env):
         self.step_count = 0
         self.total_dmg_reward = 0
         self.total_gain_money = 0
+        self.stuck_raw = 0.0
 
         self.base_event_flags = sum([
             self.bit_count(self.read_m(i))
@@ -248,8 +274,53 @@ class GoldEnv(Env):
         return observation
 
     def step(self, action):
-
+        
         self.step_count += 1
+        # # =================================================================
+        # # ⛏️ [주소 굴착기] 작동 시작
+        # # WRAM 범위: 0xC000 ~ 0xDFFF (약 8KB, 골드버전 핵심 구역)
+        # # =================================================================
+        
+        # current_step = self.step_count # 혹은 self.frame_count 등 카운터 변수 사용
+
+        # # [1단계] 평상시 상태 스냅샷 (예: 시작 후 100프레임 뒤 - 걷거나 서있을 때)
+        # # 주의: 이때는 절대 대화창이 열려있으면 안 됨!
+        # if current_step == 5: 
+        #     print("📸 [굴착기] 평상시(Idle) 메모리 스냅샷 찍는 중...")
+        #     # 메모리 통째로 복사 (0xC000 ~ 0xE000)
+        #     self.idle_memory_snapshot = [self.read_m(addr) for addr in range(0xC000, 0xE000)]
+        #     print("✅ [굴착기] 스냅샷 완료! 이제 NPC에게 말을 거세요!")
+        # print(current_step)
+        # # [2단계] 대화 중 상태 비교 (예: 시작 후 500프레임 뒤 - 이때쯤 NPC랑 대화 중이어야 함)
+        # # 팁: 타이밍 맞추기 힘들면 시간을 넉넉히 잡고 그 사이에 수동 조작으로 말을 거세요.
+        # if current_step == 100 and self.idle_memory_snapshot is not None and not self.scan_complete:
+        #     print("⛏️ [굴착기] 비교 분석 시작! (Dialogue Active)")
+            
+        #     found_count = 0
+        #     print("-" * 30)
+        #     print("주소(Hex) | 평소값 | 현재값 | 설명(추측)")
+        #     print("-" * 30)
+
+        #     for offset in range(0x2000): # 8KB 탐색
+        #         addr = 0xC000 + offset
+        #         val_idle = self.idle_memory_snapshot[offset]
+        #         val_curr = self.read_m(addr)
+
+        #         # 🔎 조건: 평소엔 0이었는데, 지금은 0이 아닌 것 (가장 강력한 조건)
+        #         if val_idle == 0 and val_curr != 0:
+                    
+        #             # 노이즈 필터링 (너무 자주 바뀌는 타이머류 제외)
+        #             # 보통 플래그는 1, 2, 255 같은 깔끔한 숫자가 많음
+        #             print(f"📍 {hex(addr)}  |   {val_idle}    |   {val_curr}    | 후보 발견!")
+        #             found_count += 1
+
+        #     print("-" * 30)
+        #     print(f"🏁 [굴착기] 분석 끝! 총 {found_count}개의 후보를 찾았습니다.")
+        #     print("이 중에서 Dxxx 또는 Cxxx 대역의 주소를 하나씩 테스트해보세요.")
+        #     self.scan_complete = True
+        
+        # # =================================================================
+        # # 기존 코드 계속...
 
         # if self.step_count%10 == 0:
         #     print(f"{self.read_m(0xD116)}입니다.") #------------------------------------------------------------------- D116 0/비전투 1/야생 2/트레이너
@@ -264,7 +335,13 @@ class GoldEnv(Env):
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
         self.update_recent_actions(action)
+        
+        #self.reward_scale * self.explore_weight * (self.exploration_first - self.exploration_end) * 0.1
+        self.exploration_first = len(self.seen_coords)
         self.update_seen_coords()
+        self.exploration_end = len(self.seen_coords)
+
+
         self.update_explore_map()
         self.update_heal_reward()
 
@@ -318,28 +395,28 @@ class GoldEnv(Env):
             # (get_game_state_reward 함수와 로직이 100% 일치해야 점수 증발이 없음)
             # ---------------------------------------------------------------------
             
-            # A. 필요한 변수들 읽기
-            badge_count = self.get_badges()
-            level_sum = self.get_levels_sum()
-            # 레벨캡 공식 (사용자님 설정에 맞게 8 또는 9 확인 필요)
-            allowed_cap = 9 + (badge_count * 8) 
+            # # A. 필요한 변수들 읽기
+            # badge_count = self.get_badges()
+            # level_sum = self.get_levels_sum()
+            # # 레벨캡 공식 (사용자님 설정에 맞게 8 또는 9 확인 필요)
+            # allowed_cap = 9 + (badge_count * 8) 
             
-            # B. 트레이너 배틀 여부 확인 (0xD119: 0이면 야생, >0이면 트레이너)
-            trainer_class = self.read_m(0xD119)
-            is_trainer_battle = (trainer_class > 0)
+            # # B. 트레이너 배틀 여부 확인 (0xD119: 0이면 야생, >0이면 트레이너)
+            # trainer_class = self.read_m(0xD119)
+            # is_trainer_battle = (trainer_class > 0)
 
             # C. 가중치 결정 (리워드 함수와 똑같이!)
-            # "레벨이 너무 높고(Cap 초과) + 야생이다" -> 탐험 가중치 적용 중인 상태
-            if level_sum > allowed_cap and not is_trainer_battle:
-                current_explore_plus = 5.0  # ⚠️ 중요: 리워드 함수에서 설정한 값(5 or 10)과 똑같이 맞추세요!
-            else:
-                current_explore_plus = 1.0
+            # "레벨이 너무 높고(Cap 초과)" -> 탐험 가중치 적용 중인 상태
+            # if level_sum >= allowed_cap:
+            #     current_explore_plus = 3.0  # ⚠️ 중요: 리워드 함수에서 설정한 값(5 or 10)과 똑같이 맞추세요!
+            # else:
+            #     current_explore_plus = 1.0
 
-            # 현재까지 쌓아온 탐험 점수
-            current_explore_val = self.reward_scale * self.explore_weight * len(self.seen_coords) * 0.1 * current_explore_plus
+            # # 현재까지 쌓아온 탐험 점수
+            # current_explore_val = self.reward_scale * self.explore_weight * len(self.seen_coords) * 0.1 * current_explore_plus
 
-            # 2. 적립금(offset)에 추가 (이러면 총점은 유지됨)
-            self.exploration_offset += current_explore_val
+            # # 2. 적립금(offset)에 추가 (이러면 총점은 유지됨)
+            # self.exploration_offset += current_explore_val
            
             # [핵심] 방문했던 좌표 기록을 싹 비웁니다.
             # 이제부터는 아는 길도 '초행길' 취급을 받아 점수를 줍니다.
@@ -369,6 +446,9 @@ class GoldEnv(Env):
         step_limit_reached = self.check_if_done()
         obs = self._get_obs()
 
+        # if self.read_m(0xD15F) != 0:
+        #     print(f"범인 찾았다.{self.step_count}")
+
         # [수정됨] info에 '총 보상'과 '세부 보상 항목'을 모두 추가합니다.
         info = {
             "x": self.agent_stats[-1]["x"],
@@ -387,7 +467,8 @@ class GoldEnv(Env):
             "reward_event": float(self.progress_reward['event']),     # 이벤트(스토리) 보상 점수
             "reward_heal": float(self.progress_reward['heal']),       # 회복 보상 점수
             "reward_exp": float(self.progress_reward['exp']),         # 경험치 보상 점수
-            "reward_dmg": float(self.progress_reward['dmg'])          # 데미지 보상 점수
+            "reward_dmg": float(self.progress_reward['dmg']),         # 데미지 보상 점수
+            "reward_stuck": float(self.progress_reward['stuck'])      # 스턱 패널티 점수
         }
 
         return obs, new_reward, False, step_limit_reached, info
@@ -513,7 +594,8 @@ class GoldEnv(Env):
     # 여기서 부터 해보자---------------------------------------------------------------------------------
     def update_seen_coords(self):
         # if not in battle
-        if self.read_m(0xD116) == 0:
+        if self.read_m(0xD15F) == 0:
+            self.countt += 1
             # [수정] 4개 받아서 변환
             x_pos, y_pos, map_group, map_number = self.get_game_coords()
             map_n = get_map_id_from_mem(map_group, map_number)
@@ -523,19 +605,61 @@ class GoldEnv(Env):
                 self.seen_coords[coord_string] += 1
             else:
                 self.seen_coords[coord_string] = 1
+            if self.countt >= 1000:
+                self.step_talking = 0
+        else:
+            self.countt = 0
+            self.step_talking += 1
+            if self.read_m(0xD116) == 0 and self.step_talking >= 100:
+                x_pos, y_pos, map_group, map_number = self.get_game_coords()
+                map_n = get_map_id_from_mem(map_group, map_number)
+                
+                coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
+                if coord_string in self.seen_coords.keys():
+                    self.seen_coords[coord_string] += 1
+                else:
+                    self.seen_coords[coord_string] = 1
+
+    # def get_current_coord_count_reward(self):
+    #     # 4개 값을 받아서
+    #     x_pos, y_pos, map_group, map_number = self.get_game_coords()
+    #     # ID로 변환
+    #     map_n = get_map_id_from_mem(map_group, map_number)
+        
+    #     coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
+    #     if coord_string in self.seen_coords.keys():
+    #         count = self.seen_coords[coord_string]
+    #     else:
+    #         count = 0
+    #     return 0 if count < 600 else 1
 
     def get_current_coord_count_reward(self):
-        # 4개 값을 받아서
         x_pos, y_pos, map_group, map_number = self.get_game_coords()
-        # ID로 변환
         map_n = get_map_id_from_mem(map_group, map_number)
         
         coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
-        if coord_string in self.seen_coords.keys():
+
+        # 1. 딕셔너리에서 꺼내기 전에 "면제권" 확인!
+        # "대화 중이고, 아직 500스텝 안 지났으면 아예 계산하지 마!"
+        if self.read_m(0xD15F) != 0 and self.step_talking < 100:
+            return 0.0  # 👈 여기가 있어야 진짜 '무적'이 됨 (패널티 0)
+        
+        # 1. 방문 횟수 가져오기
+        if coord_string in self.seen_coords:
             count = self.seen_coords[coord_string]
         else:
             count = 0
-        return 0 if count < 600 else 1
+
+        # 2. [개선] 0 or 1 대신, 밟은 횟수에 비례해서 패널티 증가 (Soft Penalty)
+        # 예: 100번 밟으면 0.1, 1000번 밟으면 1.0
+        # 이렇게 하면 조금만 비벼도 "아 여기 있으면 안 좋구나"라고 즉시 느낌.
+        penalty_value = count / 1000.0
+        
+        # 너무 커지지 않게 상한선(Cap) 설정 (최대 1.0)
+        if penalty_value > 1.0:
+            penalty_value = 1.0
+            
+        return penalty_value
 
     def get_global_coords(self):
         # [수정] 4개 받고 변환 및 실내 예외 처리
@@ -591,14 +715,14 @@ class GoldEnv(Env):
         self.total_reward = new_total
         return new_step
 
-    def group_rewards(self):
-        prog = self.progress_reward
-        # these values are only used by memory
-        return (
-            prog["level"] * 100 / self.reward_scale,
-            self.read_hp_fraction() * 2000,
-            prog["explore"] * 150 / (self.explore_weight * self.reward_scale),
-        )
+    # def group_rewards(self):
+    #     prog = self.progress_reward
+    #     # these values are only used by memory
+    #     return (
+    #         prog["level"] * 100 / self.reward_scale,
+    #         self.read_hp_fraction() * 2000,
+    #         prog["explore"] * 150 / (self.explore_weight * self.reward_scale),
+    #     )
 
     def check_if_done(self):
         done = self.step_count >= self.max_steps - 1
@@ -721,17 +845,36 @@ class GoldEnv(Env):
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         # 1. 현재 스펙 확인
 
-        current_exp_score = self.reward_scale * self.total_exp_reward * 0.1
-        current_dmg_score = self.reward_scale * self.total_dmg_reward * 0.05 # (원래 0.01 설정이면 유지)
-        current_level_score = self.reward_scale * self.get_levels_reward() * 5.0
-        current_heal_score = self.reward_scale * self.total_healing_rew * 2
-
         badge_count = self.get_badges()
         level_sum = self.get_levels_sum()
         
+        need_value_level = level_sum + 5
+
+        # current_exp_score = self.reward_scale * self.total_exp_reward * 0.3
+        # current_exp_score = self.reward_scale * self.total_exp_reward * 0.0005 * (1 + 179 * 1000 * (1/((6/5)*need_value_level**3 - 15*need_value_level**2 + 100*need_value_level - 140)) ) # 레벨 비례해서 exp는 기하급수적으로 늘어나니까 레벨에 반비례하게.
+        # current_dmg_score = self.reward_scale * self.total_dmg_reward * 0.025 # (원래 0.01 설정이면 유지)
+        # current_dmg_score = self.reward_scale * self.total_dmg_reward * 0.01 * (1 + 50/need_value_level) # 상동
+        current_level_score = self.reward_scale * self.get_levels_reward() * 5.0
+        current_heal_score = self.reward_scale * self.total_healing_rew * 2
+
         # 2. 성장 한계선 설정 (배지 0개면 15레벨, 23/31/39/47/55/63/71
         allowed_level_cap = 9 + (badge_count * 8)
         
+        
+
+        self.total_exp_reward_current = self.total_exp_reward - self.total_exp_reward_last
+        self.total_dmg_reward_current = self.total_dmg_reward - self.total_dmg_reward_last
+
+        # 값이 음수가 되는 경우 방지 (혹시 모를 메모리 튀는 현상 방어)
+        if self.total_exp_reward_current < 0: self.total_exp_reward_current = 0
+        if self.total_dmg_reward_current < 0: self.total_dmg_reward_current = 0
+
+        self.total_exp_reward_last = self.total_exp_reward
+        self.total_dmg_reward_last = self.total_dmg_reward
+
+        self.current_exp_score += self.reward_scale * self.total_exp_reward_current * 0.0005 * (1 + 179 * 1000 * (1/((6/5)*need_value_level**3 - 15*need_value_level**2 + 100*need_value_level - 140)) )
+        self.current_dmg_score += self.reward_scale * self.total_dmg_reward_current * 0.01 * (1 + 50/need_value_level)
+
         # =================================================================
         # 🕵️‍♂️ [핵심 추가] 지금 누구랑 싸우고 있니?
         # =================================================================
@@ -747,19 +890,24 @@ class GoldEnv(Env):
         # 2. AND, 지금 싸우는 게 트레이너가 아니라면 (not is_trainer_battle)
         # -> 그때만 보상을 동결(0점)시킨다.
 
-        if level_sum > allowed_level_cap and not is_trainer_battle:
+        if level_sum >= allowed_level_cap:
+            explore_plus = 3
+        else:
+            explore_plus = 1
+
+        if level_sum >= allowed_level_cap and not is_trainer_battle:
             if not self.is_combat_frozen:
                 # 📸 처음 넘는 순간! 각각의 점수를 스냅샷으로 저장
-                self.exp_snapshot = current_exp_score - self.exp_deduction
-                self.dmg_snapshot = current_dmg_score - self.dmg_deduction
+                self.exp_snapshot = self.current_exp_score - self.exp_deduction
+                self.dmg_snapshot = self.current_dmg_score - self.dmg_deduction
                 self.level_snapshot = current_level_score - self.level_deduction
                 self.heal_snapshot = current_heal_score - self.heal_deduction
                 self.is_combat_frozen = True
             
             # [핵심] 실제 점수가 오르는 족족 차감액(deduction)을 늘려버립니다.
             # 목표: (curr_exp - new_deduction) 값이 항상 frozen_base와 같게 만듦.
-            self.exp_deduction = current_exp_score - self.exp_snapshot
-            self.dmg_deduction = current_dmg_score - self.dmg_snapshot 
+            self.exp_deduction = self.current_exp_score - self.exp_snapshot
+            self.dmg_deduction = self.current_dmg_score - self.dmg_snapshot 
             self.level_deduction = current_level_score - self.level_snapshot
             self.heal_deduction = current_heal_score - self.heal_snapshot
 
@@ -768,7 +916,6 @@ class GoldEnv(Env):
             # final_dmg = self.dmg_snapshot
             # final_level = self.level_snapshot
 
-            explore_plus = 5
 
         # [상황 B] 레벨캡 미만 or 배지 획득 (해제)
         else:
@@ -786,14 +933,15 @@ class GoldEnv(Env):
             # final_dmg = current_dmg_score
             # final_level = current_level_score
             
-            explore_plus = 1
-        
-        
+        self.exploration_base += self.reward_scale * self.explore_weight * (self.exploration_end - self.exploration_first) * 0.1 * explore_plus
+        self.stuck_raw += self.get_current_coord_count_reward()
+
         # 4. 최종 점수 적용 (실제 점수 - 차감액)
-        final_exp = current_exp_score - self.exp_deduction
-        final_dmg = current_dmg_score - self.dmg_deduction
+        final_exp = self.current_exp_score - self.exp_deduction
+        final_dmg = self.current_dmg_score - self.dmg_deduction
         final_level = current_level_score - self.level_deduction
         final_heal = current_heal_score - self.heal_deduction
+        final_explore = self.exploration_base
 
         state_scores = {
             "event": self.reward_scale * self.update_max_event_rew() * 10,
@@ -803,8 +951,8 @@ class GoldEnv(Env):
             "exp": final_exp,
             "dead": self.reward_scale * self.died_count * -1,
             "badge": self.reward_scale * self.get_badges() * 20,
-            "explore": self.exploration_offset + self.reward_scale * self.explore_weight * len(self.seen_coords) * 0.1 * explore_plus,
-            "stuck": self.reward_scale * self.get_current_coord_count_reward() * -0.05,
+            "explore": final_explore,
+            "stuck": self.reward_scale * self.stuck_raw * -0.0005,
             "dmg": final_dmg
         }
 
