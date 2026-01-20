@@ -61,16 +61,16 @@ if __name__ == "__main__":
 
     # save_video
     if config.env_config.get("save_video", False):
-        print("🎥 영상 녹화 기능이 활성화되었습니다.")
+        print("영상 녹화 기능이 활성화되었습니다.")
 
         video_folder = os.path.join(current_session_path, "videos")
         os.makedirs(video_folder, exist_ok=True)
 
         # 영상 길이 (스텝 수)
-        video_length = 3000  # 약 1~2분 분량
+        video_length = 5000  # 약 1~2분 분량
 
         # 녹화 빈도 (몇 스텝마다 녹화할지)
-        record_freq = 50_000
+        record_freq = 25_000
 
         env = VecVideoRecorder(
             env,

@@ -29,7 +29,21 @@ class GoldEnv(gym.Env):
         self.step_count = 0 #AI가 걸은 횟수
         self.total_reward = 0 #총 보상의 수
         self.current_badge_count = 0 #게임 내 뱃지의 개수
-        
+
+        # [NEW] 누적 보상 집계용 변수 (Tensorboard 로깅용)
+        self.cum_reward_badge = 0
+        self.cum_reward_battle = 0
+        self.cum_reward_exp = 0
+        self.cum_reward_dmg = 0
+        self.cum_reward_dead = 0
+        self.cum_reward_explore = 0
+        self.cum_reward_penalty = 0
+        self.cum_reward_stuck = 0
+        self.cum_reward_event = 0
+        self.cum_reward_gemini = 0
+        self.cum_reward_level = 0
+        self.cum_reward_map = 0
+
         #이전 상태 저장용 (변화 감지)
         self.prev_money = 0
         self.prev_badges = 0
@@ -42,16 +56,23 @@ class GoldEnv(gym.Env):
 
         #통계용 변수
         self.seen_coords = set() #게임 내 탐험 좌표
+        self.seen_map_ids = set()  # 방문한 맵 ID 저장소 (구역 단위)
         self.max_level_sum = 0 #게임에서 만난 최대 레벨
+        self.max_party_level = 0 #내 포켓몬 최대 레벨
         self.death_count = 0
         self.heal_battle_count = 0  # 전투 중 회복 (물약/기술)
         self.heal_field_count = 0  # 필드 중 회복 (포켓몬센터/물약)
+        self.prev_party_hp_sum = 0 #파티 총 체력
+        self.overlap_count = 0
+        self.battle_step_count = 0 #전투 시간 측정 전투 동안 시간을 끄는 행위 방지용
+        self.battle_penalty = 0
+        self.battle_trainer = 0
         
         #추가 변수들
         self.steps_on_map = 0 #현재 맵에서 보낸 시간
         self.prev_map_id = -1 #이전 맵 ID (맵 변경 감지용)
         self.coord_history = deque(maxlen=100) #최근 100스텝 좌표 저장 // **AI 무기력 문제 발생**
-        # [NEW] 최근 화면 이미지 10개를 저장할 변수 (메모리 절약을 위해 maxlen=10)
+        # [NEW] 최근 화면 이미지 20개를 저장할 변수 (메모리 절약을 위해 maxlen=20)
         #AI 무기력문제를 LLM으로 해결하기 위한 변수
         self.recent_frames = deque(maxlen=20)
 
@@ -199,9 +220,23 @@ class GoldEnv(gym.Env):
             self.prev_map_id = cur_map_id
 
         # 레벨 합계 계산
-        cur_level_sum = utils.get_level_sum(self.pyboy)
+        cur_level_sum, cur_max_level = utils.get_level_sum(self.pyboy)
+
         if cur_level_sum > self.max_level_sum:
             self.max_level_sum = cur_level_sum
+
+        if cur_max_level > self.max_party_level:
+            self.max_party_level = cur_max_level
+
+        try:
+            #배틀 타입 주소 (전투 중 일 때)
+            if self.pyboy.memory[0xD116] != 0:
+                current_opp_level = self.pyboy.memory[0xD0FC]
+                if 0 < current_opp_level <= 100: #쓰레기 값 방지
+                    if current_opp_level > self.max_opp_level:
+                        self.max_opp_level = current_opp_level
+        except Exception:
+            pass  # 메모리 접근 에러 방지
 
         # 현재 게임화면을 담아옴 (Observation)
         obs = self.GetObs()
@@ -210,41 +245,46 @@ class GoldEnv(gym.Env):
         self.recent_frames.append(obs.copy()) #obs하면 주소만 저장됨
 
         # 보상 업데이트 (Reward)
-        reward, reward_details = self.GetReward(action)
+        reward = self.GetReward(action)
         self.total_reward += reward
 
         # 게임의 목표달성 여부
         terminated = False
         truncated = self.step_count >= self.max_steps
 
-        # -----------------------------------------------------------
-        # 4. 정보 반환 (Info) - 로그용 데이터
-        # -----------------------------------------------------------
+        # 로그 데이터
         info = {
-            # 1. 게임 진행 상황 (Game)
             "game/badges": self.current_badge_count,
             "game/level_sum": utils.get_level_sum(self.pyboy),
+            "game/party_max_level": cur_max_level,
             "game/exploration": len(self.seen_coords),
+            "game/map_count": len(self.seen_map_ids),
             "game/deaths": self.death_count,
-
-            # 2. 회복 세분화 (Heals)
             "game/heal_battle": self.heal_battle_count,
             "game/heal_field": self.heal_field_count,
+            "game/battle_wins": self.battle_wins,
+            "game/opp_max_level": self.max_opp_level,
+            "game/overlap_step": self.overlap_count,
+            "game/money": self.prev_money,
+            "game/battle_trainer": self.battle_trainer,
 
-            # 3. 상태 변수 (Stats)
             "stats/step_count": self.step_count,
             "stats/total_reward": self.total_reward,
             "stats/map_id": cur_map_id,
 
-            # 4. 보상 상세 (Rewards)
-            "reward/badge": reward_details["badge"],
-            "reward/battle": reward_details["battle"],
-            "reward/explore": reward_details["explore"],
-            "reward/exp": reward_details["exp"],
-            "reward/dmg": reward_details["dmg"],
-            "reward/dead": reward_details["dead"],
-            "reward/gemini": reward_details["gemini"],
-            "reward/penalty": reward_details["penalty"]
+            "reward/badge": self.cum_reward_badge,
+            "reward/battle": self.cum_reward_battle,
+            "reward/explore": self.cum_reward_explore,
+            "reward/exp": self.cum_reward_exp,
+            "reward/dmg": self.cum_reward_dmg,
+            "reward/dead": self.cum_reward_dead,
+            "reward/gemini": self.cum_reward_gemini,
+            "reward/penalty": self.cum_reward_penalty,
+            "reward/stuck": self.cum_reward_stuck,
+            "reward/event": self.cum_reward_event,
+            "reward/level": self.cum_reward_level,
+            "reward/battle_penalty": self.battle_penalty,
+            "reward/map": self.cum_reward_map,
         }
 
         return obs, reward, terminated, truncated, info
@@ -256,14 +296,11 @@ class GoldEnv(gym.Env):
         추가 기능: EXP, 레벨업, 전투 승리, 적에게 준 데미지, 기절 패널티, 회복 감지
         """
 
-        # ------------------------------------------------------------------
         # 1. 메모리 데이터 읽기 (Hybrid Logic 적용)
-        # ------------------------------------------------------------------
         try:
             # 기본 정보 읽기
-            cur_money = utils.read_bcd(self.pyboy, utils.MEM_MONEY, 3)  # BCD로 읽기 권장
-            cur_badges = utils.get_badges(self.pyboy)
-            cur_level_sum = utils.get_level_sum(self.pyboy)
+            cur_money = utils.read_bcd(self.pyboy, utils.MEM_MONEY, 3)
+            cur_level_sum, cur_max_level = utils.get_level_sum(self.pyboy)
             cur_exp = utils.read_uint24(self.pyboy, utils.MEM_P1_EXP)  # Big Endian
             cur_battle_type = self.pyboy.memory[utils.MEM_BATTLE_TYPE]
 
@@ -272,18 +309,18 @@ class GoldEnv(gym.Env):
             cur_map_num = self.pyboy.memory[utils.MEM_MAP_NUMBER]
             cur_map_id = (cur_map_group << 8) | cur_map_num
 
-            # [추가] 좌표 읽기
+            # 좌표 읽기
             cur_x = utils.read_uint8(self.pyboy, utils.MEM_X_POS)
             cur_y = utils.read_uint8(self.pyboy, utils.MEM_Y_POS)
 
             # [핵심] 전투 vs 필드 체력 주소 스위칭
             if cur_battle_type != 0:
-                # ⚔️ [전투 중] Active Battle Struct (Big Endian)
+                # [전투 중] Active Battle Struct (Big Endian)
                 cur_hp = utils.read_be16(self.pyboy, utils.MEM_BATTLE_HP_NOW)
                 cur_max_hp = utils.read_be16(self.pyboy, utils.MEM_BATTLE_HP_MAX)
                 cur_enemy_hp = utils.read_be16(self.pyboy, utils.MEM_ENEMY_HP)
             else:
-                # 🌿 [필드] Party Struct (Little Endian)
+                # [필드] Party Struct (Little Endian)
                 cur_hp = utils.read_uint16(self.pyboy, utils.MEM_P1_HP)
                 cur_max_hp = utils.read_uint16(self.pyboy, utils.MEM_P1_MAX_HP)
                 cur_enemy_hp = 0
@@ -292,246 +329,285 @@ class GoldEnv(gym.Env):
             print(f"Error reading memory: {e}")
             return 0, {}
 
-        # 보상 카테고리 초기화
-        reward_details = {
-            "badge": 0, "gemini": 0, "penalty": 0, "stuck": 0,  # 기존
-            "event": 0, "explore": 0, "battle": 0, "level": 0,
-            "heal": 0, "exp": 0, "dead": 0, "dmg": 0  # 신규
-        }
-
         total_step_reward = 0.0
 
-        #시간 지체 패널티 추가
-        # 매 스텝마다 조금씩 감점하여 AI가 빨리 움직이도록 강제함
-        # penalty = -0.00001
-        # total_step_reward += penalty
-        # reward_details["penalty"] += penalty
-
-        # =================================================================
-        # [NEW] 벽 박치기(Wall Hit) 패널티 적용
-        # =================================================================
-
-        stuck_penalty = 0
-        # self.valid_actions 인덱스 기준:
-        # 0:Down, 1:Left, 2:Right, 3:Up (이동 키)
-        # 4:A, 5:B (상호작용 키 - 이건 제자리여도 괜찮음)
-
-        # 조건 1: 키를 눌렀는가? (action < 6)
-        # 조건 2: 기록이 2개 이상인가? (비교할 이전 좌표가 있어야 함)
-        if cur_battle_type == 0:
-            if action < 6 and len(self.coord_history) >= 2:
-                current_pos = self.coord_history[-1]  # 방금 이동한 후 좌표
-                prev_pos = self.coord_history[-2]  # 이동 전 좌표
-
-                # 조건 3: 키를 눌렀는데 좌표가 토씨 하나 안 바뀌었나?
-                if current_pos == prev_pos:
-                    # 벽에 박았으므로 패널티 부여!
-                    stuck_penalty = -0.001  # -0.01 정도면 꽤 따끔합니다.
-
-        # 점수 반영
-        total_step_reward += stuck_penalty
-        reward_details["stuck"] += stuck_penalty
 
         #배지 개수에 따른 가중치 가져오기
         reward_weights = self.config.get("reward_weights", {})
-        weights = reward_weights.get(cur_badges, reward_weights.get("default", {}))
+        weights = reward_weights.get(self.current_badge_count, reward_weights.get("default", {}))
 
-        # =================================================================
-        # [NEW] 이벤트 플래그 보상 로직
-        # =================================================================
+        # 뱃지 획득
+        if self.current_badge_count > self.prev_badges:
+            r = 1000.0
+            total_step_reward += r
+            self.cum_reward_badge += r
+            print(f"배지 획득! ({self.prev_badges} -> {self.current_badge_count}) +{r}")
+            
+
+        #이벤트 보상
         # 1. 현재 이벤트 총합 계산
         cur_event_sum = utils.get_all_events_sum(self.pyboy)
 
         # 2. 이전보다 늘어났는지 확인
         if cur_event_sum > self.prev_event_sum:
             diff = cur_event_sum - self.prev_event_sum
-
             # 3. 보상 계산 (변화량 * 기본10점 * 가중치)
-            # 이벤트는 중요하므로 기본 점수를 10.0으로 설정
             r = diff * 10.0 * weights.get("event", 1.0)
-
             total_step_reward += r
-            reward_details["event"] += r
-
+            self.cum_reward_event += r
             # 로그 출력
             print(f"이벤트 발생! ({self.prev_event_sum} -> {cur_event_sum}) +{r:.2f}")
-
             # 상태 업데이트
             self.prev_event_sum = cur_event_sum
-        #패널티 로직
-        # # (1) 한 맵에 너무 오래 머무름  **동일하게 AI 무기력 문제 발생**
-        # if self.steps_on_map > 4096:
-        #     penalty = -0.1
-        #     total_step_reward += penalty
-        #     reward_details["penalty"] += penalty
-        #
-        #     if self.steps_on_map == 4097:
-        #         print("한 맵에 너무 오래 있습니다! (-5점)")
-        #         total_step_reward -= 5.0
-        #         reward_details["penalty"] -= 5.0
 
-        # # (2) 제자리 걸음 (갇힘 감지) **AI 무기력 문제 발생**
-        # if cur_battle_type == 0:
-        #     # 100스텝 데이터가 쌓였을 때만 검사
-        #     if len(self.coord_history) == 100:
-        #         unique_coords = len(set(self.coord_history))
-        #
-        #         # 기준을 10 -> 3으로 대폭 완화
-        #         # 이유: 2x2 풀숲(좌표 4개)이나 1x3 복도에서 왔다갔다 하는 건 '의도된 행동'일 수 있음.
-        #         # 하지만 3개 미만(1~2개)이라는 건 진짜 벽에 박고 있거나 제자리 회전만 한다는 뜻.
-        #         if unique_coords < 3:
-        #             print("갇힘 감지 (-0.1점)")
-        #             penalty = -0.1
-        #             total_step_reward += penalty
-        #             reward_details["penalty"] += penalty
-        #
-        #             # (선택) 갇혔을 때 coord_history를 비워줘서 연속 감점을 막고 새 출발 기회를 줌
-        #             self.coord_history.clear()
-
-        #보상 로직
-        #뱃지 획득
-        if cur_badges > self.prev_badges:
-            r = 100.0
-            total_step_reward += r
-            reward_details["badge"] += r
-            print(f"배지 획득! ({self.prev_badges} -> {cur_badges})")
-
-       
-        # [Explore] 진짜 탐험 (새로운 좌표 방문 시 보상)
-        # step 함수에서 이미 self.seen_coords에 현재 좌표를 추가하고 있습니다.
-        # 따라서 "이전 스텝의 방문 수"보다 "현재 방문 수"가 늘어났다면 새로운 땅을 밟은 것입니다.
-
-        # (주의: 이 로직을 쓰려면 GetReward 부르기 직전에 step함수에서 seen_coords 업데이트 하기 전의 길이를 알아야 함)
-        # 하지만 더 쉬운 방법은, "현재 좌표가 seen_coords에 없었으면 보상"을 주는 것입니다.
-        # step 함수 구조상 seen_coords.add가 먼저 일어나므로,
-        # 로직 순서를 살짝 바꾸거나 아래 방식을 추천합니다.
-
-        # -------------------------------------------------------
-        # [수정 제안] GoldEnv.py의 step 함수 로직과 연동된 방식
-        # -------------------------------------------------------
-
+        # 탐험 보상
         # 현재 위치 (맵, X, Y)
-        curr_coord = (cur_map_id, cur_x, cur_y)
+        curr_coord = (cur_x, cur_y, cur_map_id)
+        # 만약 이 좌표가 내 기억(seen_coords)에 없다면? -> 새로운 땅이다! // 필드인 경우에
+        if cur_battle_type == 0:
+            if curr_coord not in self.seen_coords:
+                if self.current_badge_count == 0 and self.max_party_level >= 15:
+                    r = 0.1 * weights.get("exploration", 1.0)  # 작은 보상을 줌 (티끌 모아 태산)
+                    total_step_reward += r
+                    self.cum_reward_explore += r
+                    self.seen_coords.add(curr_coord)
+                    if len(self.seen_coords) % 50 == 0:
+                        print(f"작은 보상 50번째 +{r}")
+                else:
+                    r = 0.01 * weights.get("exploration", 1.0)  # 작은 보상을 줌 (티끌 모아 태산)
+                    total_step_reward += r
+                    self.cum_reward_explore += r
+                    self.seen_coords.add(curr_coord)
+                    if len(self.seen_coords) % 50 == 0:
+                        print(f"작은 보상 50번째 +{r}")
 
-        # 만약 이 좌표가 내 기억(seen_coords)에 없다면? -> 새로운 땅이다!
-        if curr_coord not in self.seen_coords:
-            r = 0.0001 * weights.get("exploration", 1.0)  # 작은 보상을 줌 (티끌 모아 태산)
-            total_step_reward += r
-            reward_details["explore"] += r
-            # (중요) 보상을 줬으니 기록에 추가
-            self.seen_coords.add(curr_coord)
-        else: #새로운 땅이 아닌 경우
-            r = 0.0002 * weights.get("exploration", 1.0)
-            total_step_reward -= r
-            reward_details["explore"] -= r
-            
+            else:  # 새로운 땅이 아닌 경우
+                recent_visit_count = self.coord_history.count(curr_coord)
+                # 최근에 50번 이상 밟았던 곳이라면? -> 감점
+                if self.current_badge_count == 0 and self.max_party_level >= 15:
+                    if recent_visit_count > 20:
+                        # 자주 밟을수록 감점이 커짐 (지수적 패널티) 고민
+                        r = 0.0002 * weights.get("exploration", 1.0)
+                        total_step_reward -= r
+                        self.cum_reward_penalty -= r
+                        self.overlap_count += 1
+                else:
+                    if recent_visit_count > 20:
+                        # 자주 밟을수록 감점이 커짐 (지수적 패널티) 고민
+                        r = 0.002 * weights.get("exploration", 1.0)
+                        total_step_reward -= r
+                        self.cum_reward_penalty -= r
+                        self.overlap_count += 1
 
-        # # [Explore] 새로운 맵 진입 **기존 코드**
-        # if cur_map_id != self.prev_map_id:
-        #     r = 1.0 * weights.get("explore", 1.0)
-        #     total_step_reward += r
-        #     reward_details["explore"] += r
-        #     # 맵 이동 시 체류 시간 초기화는 Step 함수 등에서 처리한다고 가정
+        #Map ID기준 새로운 지역 도달 보상
+        if self.current_badge_count == 0 and self.max_party_level >= 15:
+            if cur_map_id not in self.seen_map_ids:
+                r = 5.0 * weights.get("exploration", 1.0)
+                print(f"새로운 지역! (Map : {cur_map_id}) +{r}")
+                total_step_reward += r
+                self.cum_reward_map += r
+                # 방문 기록에 추가
+                self.seen_map_ids.add(cur_map_id)
+        else:
+            if cur_map_id not in self.seen_map_ids:
+                r = 1.0 * weights.get("exploration", 1.0)
+                print(f"새로운 지역! (Map : {cur_map_id}) +{r}")
+                total_step_reward += r
+                self.cum_reward_map += r
+                # 방문 기록에 추가
+                self.seen_map_ids.add(cur_map_id)
 
-        #경험치 보상
+        # 경험치 보상
         if cur_exp > self.prev_exp:
-            # 경험치는 숫자가 크므로 0.001 곱함
-            r = (cur_exp - self.prev_exp) * 0.001 * weights.get("exp", 1.0)
-            total_step_reward += r
-            reward_details["exp"] += r
+            if self.current_badge_count == 0 and self.max_party_level >= 15:
+                r = (cur_exp - self.prev_exp) * 0.002 * weights.get("exp", 1.0)
+                print(f"경험치 보상! +{r}")
+                total_step_reward += r
+                self.cum_reward_exp += r
+            else:
+                # 경험치는 숫자가 크므로 0.01 곱함
+                r = (cur_exp - self.prev_exp) * 0.01 * weights.get("exp", 1.0)
+                print(f"경험치 보상! +{r}")
+                total_step_reward += r
+                self.cum_reward_exp += r
 
-        #레벨업 보상
-        if cur_level_sum > self.prev_level_sum:
-            r = (cur_level_sum - self.prev_level_sum) * 1.0 * weights.get("level", 1.0)
-            total_step_reward += r
-            reward_details["level"] += r
-            print(f"레벨 업! (Total: {cur_level_sum})")
+        # 레벨업 보상
+        if self.max_party_level < 15:
+            if cur_level_sum > self.prev_level_sum:
+                r = (cur_level_sum - self.prev_level_sum) * 1.0 * weights.get("level", 1.0)
+                total_step_reward += r
+                self.cum_reward_level += r
+                print(f"레벨 업! (Total: {cur_level_sum})")
+        else:
+            if cur_level_sum > self.prev_level_sum:
+                r = (cur_level_sum - self.prev_level_sum) * 0.03 * weights.get("level", 1.0)
+                total_step_reward += r
+                self.cum_reward_level += r
+                print(f"레벨 업! (Total: {cur_level_sum})")
 
-        #Dmg 보상
+        # 전투 보상
+        # 트레이너 전투에 진입한 경우 가점.
+        if self.prev_battle_type == 0 and cur_battle_type == 2:
+            r = 5.0 * weights.get("battle", 1.0)
+            total_step_reward += r
+            self.cum_reward_battle += r
+            self.battle_trainer += 1
+            print(f"트레이너와의 전투! +{r}")
+
+            # 조건: 전투가 끝났는데(전투->필드) + 적의 체력이 0이었거나 + 경험치가 올랐어야 함
+            if self.max_party_level < 15:
+                if self.prev_battle_type != 0 and cur_battle_type == 0:
+                    # 1. 진짜 승리 (적 체력이 0이 됨 OR 경험치를 얻음)
+                    # (PyBoy 메모리 타이밍 이슈로 적 체력 0이 감지 안 될 수도 있으니 경험치 증가도 같이 봅니다)
+                    if self.prev_enemy_hp == 0 or cur_exp > self.prev_exp:
+                        r = 1.0 * weights.get("battle", 1.0)
+                        total_step_reward += r
+                        self.battle_wins += 1
+                        self.cum_reward_battle += r
+                        print(f"전투 승리! +{r}")
+            else:
+                if self.max_level_sum >= 25:
+                    if self.prev_battle_type != 0 and cur_battle_type == 0:
+                        # 1. 진짜 승리 (적 체력이 0이 됨 OR 경험치를 얻음)
+                        # (PyBoy 메모리 타이밍 이슈로 적 체력 0이 감지 안 될 수도 있으니 경험치 증가도 같이 봅니다)
+                        if self.prev_enemy_hp == 0 or cur_exp > self.prev_exp:
+                            r = -0.1 * weights.get("battle", 1.0)
+                            total_step_reward += r
+                            self.battle_wins += 1
+                            self.cum_reward_battle += r
+                            print(f"전투 과다.. +{r}")
+                else:
+                    if self.prev_battle_type != 0 and cur_battle_type == 0:
+                        # 1. 진짜 승리 (적 체력이 0이 됨 OR 경험치를 얻음)
+                        # (PyBoy 메모리 타이밍 이슈로 적 체력 0이 감지 안 될 수도 있으니 경험치 증가도 같이 봅니다)
+                        if self.prev_enemy_hp == 0 or cur_exp > self.prev_exp:
+                            r = 0.1 * weights.get("battle", 1.0)
+                            total_step_reward += r
+                            self.battle_wins += 1
+                            self.cum_reward_battle += r
+                            print(f"전투 승리! +{r}")
+
+        # Dmg 보상
         if self.prev_battle_type != 0 and cur_battle_type != 0:
-            if self.prev_enemy_hp > cur_enemy_hp:
-                dmg = self.prev_enemy_hp - cur_enemy_hp
-                r = dmg * 0.001 * weights.get("dmg", 1.0)
+            if self.current_badge_count == 0 and self.max_party_level >= 15:
+                if self.prev_enemy_hp > cur_enemy_hp:
+                    dmg = self.prev_enemy_hp - cur_enemy_hp
+                    r = dmg * 0.0002 * weights.get("dmg", 1.0)
+                    print(f"대미지 보상!: +{r}")
+                    total_step_reward += r
+                    self.cum_reward_dmg += r
+            else:
+                if self.prev_enemy_hp > cur_enemy_hp:
+                    dmg = self.prev_enemy_hp - cur_enemy_hp
+                    r = dmg * 0.001 * weights.get("dmg", 1.0)
+                    print(f"대미지 보상!: +{r}")
+                    total_step_reward += r
+                    self.cum_reward_dmg += r
+
+        # 회복 보상
+        # 전투 중일 때
+        if self.prev_battle_type == cur_battle_type:  # 이거 없으면 오류가 있음. -> 전투 그냥 나가면 힐 보상을 주게 됨.
+            if cur_hp > self.prev_hp > 0 and cur_enemy_hp > 0:  # 레벨업 힐 보상 오류 -> 현재 적이 살아있는 경우에 보상주기
+                # 1. 전투 중일 때
+                if cur_battle_type != 0:
+                    # 전투 중에는 prev_hp가 0보다 커야 함
+                    if self.prev_hp > 0:
+                        diff = cur_hp - self.prev_hp
+                        r = diff * 0.01 * weights.get("heal", 1.0)
+                        print(f"전투 중 힐 보상 +{r:.3f}")
+                        total_step_reward += r
+                        self.heal_battle_count += 1
+
+                # 2. 필드일 때
+                else:
+                    # 필드에서는 '부활(0->MAX)' 악용 방지를 위해 이전 체력이 0보다 클 때만 인정
+                    if self.prev_hp > 0:
+                        diff = cur_hp - self.prev_hp
+                        r = diff * 0.01 * weights.get("heal", 1.0)
+                        print(f"필드 중 힐 보상 +{r:.3f}")
+                        total_step_reward += r
+                        self.heal_field_count += 1
+
+        # 벽 박기 패널티 적용
+        # 조건 1: 키를 눌렀는가? (action < 4)
+        # 조건 2: 기록이 2개 이상인가? (비교할 이전 좌표가 있어야 함)
+        if cur_battle_type == 0:
+            if action < 4 and len(self.coord_history) >= 2:
+                if self.coord_history[-1] == self.coord_history[-2]:
+                    stuck_penalty = -0.001 * weights.get("exploration", 1.0)  # 패널티
+                    total_step_reward += stuck_penalty
+                    self.cum_reward_stuck += stuck_penalty
+
+            # # 2. [추가] 진동 감지 (A-B-A-B 패턴 방지)
+            # # 최근 10번 움직였는데, 고유한 좌표가 2개 이하다? -> 뺑뺑이 도는 중
+            # if len(self.coord_history) >= 10:
+            #     recent_path = list(self.coord_history)[-10:]
+            #     unique_coords = set(recent_path)
+            #     if len(unique_coords) <= 2:
+            #         loop_penalty = -0.1 * weights.get("exploration", 1.0)  # 꽤 강한 패널티 필요
+            #         total_step_reward += loop_penalty
+            #         self.cum_reward_stuck += loop_penalty
+
+
+        #전투 지속 패널티
+        if cur_battle_type != 0:
+            self.battle_step_count += 1
+            r = 0.0001
+            if self.battle_step_count > 500:
+                r = 0.001
+            total_step_reward -= r
+            self.battle_penalty -= r
+            if self.battle_step_count % 100 == 0:
+                print(f"배틀 지속 패널티 100번째 -{r}")
+        else:
+            self.battle_step_count = 0
+
+        #사망 패널티
+        cur_party_hp_sum = utils.get_party_hp_sum(self.pyboy)
+        if self.prev_party_hp_sum > 0 and cur_party_hp_sum == 0:
+            if self.current_badge_count == 0 and self.max_party_level >= 15:
+                r = -10.0 * weights.get("dead", 1.0)
+                print(f"사망 패널티: {r}")
                 total_step_reward += r
-                reward_details["dmg"] += r
-
-        #사망 페널티
-        if self.prev_hp > 0 and cur_hp == 0:
-            r = -0.1 * weights.get("dead", 1.0)
-            total_step_reward += r
-            reward_details["dead"] += r
-
-        #전투 보상
-        # 조건: 전투가 끝났는데(전투->필드) + 적의 체력이 0이었거나 + 경험치가 올랐어야 함
-        if self.prev_battle_type != 0 and cur_battle_type == 0:
-            # 1. 진짜 승리 (적 체력이 0이 됨 OR 경험치를 얻음)
-            # (PyBoy 메모리 타이밍 이슈로 적 체력 0이 감지 안 될 수도 있으니 경험치 증가도 같이 봅니다)
-            if self.prev_enemy_hp == 0 or cur_exp > self.prev_exp:
-                r = 1.0 * weights.get("battle", 1.0)
+                self.death_count += 1
+                self.cum_reward_dead += r
+            else:
+                r = -1.0 * weights.get("dead", 1.0)
+                print(f"사망 패널티: {r}")
                 total_step_reward += r
-                reward_details["battle"] += r
-                print("전투 승리!")
-
-
-            # # 2. 도망침 (내 체력은 있는데 적 체력도 남아있고 경험치도 그대로임)
-            # else:
-            #     total_step_reward -= 0.1
-            #     print("도망 패널티 (-0.1점)")
-            #     # 여기서 선택할 수 있습니다.
-            #     # 옵션 A: 그냥 보상 없음 (0점) -> 추천
-            #     # 옵션 B: 도망치지 말라고 약간의 감점 (-0.1점)
-            #     pass
-
-        #회복 보상
-        if cur_hp > self.prev_hp:
-            #전투 중일 때
-            if cur_battle_type != 0 and self.prev_hp > 0:
-                diff = cur_hp - self.prev_hp
-                r = diff * 0.001 * weights.get("heal", 1.0)
-                total_step_reward += r
-                reward_details["heal"] += r
-                self.heal_battle_count += 1
-            #필드일 때 -> 이전 체력이 0보다 클 때만 인정 (부활 시에도 인정을 해버리는 문제 때문에)
-            elif cur_battle_type == 0 and self.prev_hp > 0:
-                diff = cur_hp - self.prev_hp
-                r = diff * 0.01 * weights.get("heal", 1.0)
-                total_step_reward += r
-                reward_details["heal"] += r
-                self.heal_field_count += 1
-
-        #기존 필드일 때의 체력 변화
-        # if cur_battle_type == 0 and cur_hp > self.prev_hp:
-        #     r = 0.1 * weights.get("heal", 1.0)
-        #     total_step_reward += r
-        #     reward_details["heal"] += r
+                self.death_count += 1
+                self.cum_reward_dead += r
+        # 상태 업데이트
+        self.prev_party_hp_sum = cur_party_hp_sum
 
         #[Gemini] LLM 코치 보상 (기존 로직 유지)
         if self.coach and (self.step_count % self.coach_interval == 0):
             obs = self.GetObs()
 
-            # --- [추가] LLM에게 떠먹여 줄 정보 포장 ---
             game_status = {
-                "Location ID": cur_map_id,
-                "Badges": cur_badges,
-                "Battle Mode": "Yes" if cur_battle_type != 0 else "No",
-                "My HP": f"{cur_hp}/{cur_max_hp}",
-                "Enemy HP": f"{cur_enemy_hp}" if cur_battle_type != 0 else "None",
-                "Level Sum": cur_level_sum,
-                "Money": cur_money
+                "지역 ID : ": cur_map_id,
+                "뱃지 개수 : ": self.current_badge_count,  # 뱃지 개수
+                "최대 레벨 : ": cur_max_level,
+                "상대 최대 레벨 : ": self.max_opp_level,  #지금까지 만난 적 중 최고 레벨
+                "이긴 횟수 : ": self.battle_wins,  # 승리한 전투 횟수
+                "죽은 횟수 : ": self.death_count,  # 눈앞이 캄캄해짐(전멸) 횟수
+                "탐험한 좌표 개수 : ": len(self.seen_coords),  # 탐험한 고유 좌표 개수 (맵 탐색도)
+                "내 체력 비율 : ": f"{cur_hp}/{cur_max_hp}",
+                "상대 체력 : ": f"{cur_enemy_hp}" if cur_battle_type != 0 else "None",
+                "가진 돈 액수 : ": cur_money
             }
-            # ----------------------------------------
             # LLM에게 현재까지의 상황과 점수를 주고 평가받음
             raw_score, reason = self.coach.evaluate_screen(obs, total_step_reward, game_status, list(self.recent_frames))
 
             if raw_score != 0:
                 bonus = raw_score * weights.get("gemini", 1.0)
                 total_step_reward += bonus
-                reward_details["gemini"] += bonus
+                self.cum_reward_gemini += bonus
                 print(f"LLM 평가: \"{reason}\" -> {raw_score}점 (+{bonus:.2f})")
 
         # 5. 내부 변수 업데이트
         self.prev_money = cur_money
-        self.prev_badges = cur_badges
+        self.prev_badges = self.current_badge_count
         self.prev_exp = cur_exp
         self.prev_level_sum = cur_level_sum
         self.prev_hp = cur_hp
@@ -540,7 +616,7 @@ class GoldEnv(gym.Env):
         self.prev_enemy_hp = cur_enemy_hp
         self.prev_map_id = cur_map_id
 
-        return total_step_reward, reward_details
+        return total_step_reward
 
     def AI_action(self, action_freq):
         #버튼 누름
@@ -568,14 +644,36 @@ class GoldEnv(gym.Env):
         self.step_count = 0
         self.total_reward = 0
         self.seen_coords = set()
+        self.seen_map_ids = set()
         self.steps_on_map = 0
         self.prev_map_id = -1
         self.coord_history.clear()
         self.recent_frames.clear()
 
+        self.cum_reward_badge = 0
+        self.cum_reward_battle = 0
+        self.cum_reward_exp = 0
+        self.cum_reward_dmg = 0
+        self.cum_reward_dead = 0
+        self.cum_reward_explore = 0
+        self.cum_reward_penalty = 0
+        self.cum_reward_stuck = 0
+        self.cum_reward_event = 0
+        self.cum_reward_gemini = 0
+        self.cum_reward_level = 0
+        self.cum_reward_map = 0
+
+
         self.death_count = 0
         self.heal_battle_count = 0
         self.heal_field_count = 0
+        self.max_opp_level = 0
+        self.battle_wins = 0
+        self.prev_party_hp_sum = utils.get_party_hp_sum(self.pyboy)
+        self.overlap_count = 0
+        self.battle_step_count = 0
+        self.battle_penalty = 0
+        self.battle_trainer = 0
 
         #init부터 다시 시작함
         if self.init_state and os.path.exists(self.init_state):
@@ -585,7 +683,7 @@ class GoldEnv(gym.Env):
             self.prev_money = utils.read_bcd(self.pyboy, utils.MEM_MONEY, 3)
             self.prev_badges = utils.get_badges(self.pyboy)
             self.current_badge_count = self.prev_badges
-            self.prev_level_sum = utils.get_level_sum(self.pyboy)
+            self.prev_level_sum, self.max_party_level = utils.get_level_sum(self.pyboy)
             self.prev_exp = utils.read_uint24(self.pyboy, utils.MEM_P1_EXP)
 
             self.prev_battle_type = self.pyboy.memory[utils.MEM_BATTLE_TYPE]
@@ -619,20 +717,6 @@ class GoldEnv(gym.Env):
             self.prev_enemy_hp = 0
 
         return self.GetObs(), {}
-
-    def get_current_coord_count_reward(self):
-        # 기록이 없으면 0 리턴
-        if not self.coord_history:
-            return 0
-
-        # 가장 최근 위치 (방금 step에서 추가한 위치)
-        current_pos = self.coord_history[-1]
-
-        # 최근 100스텝 중 현재 위치와 동일한 좌표가 몇 개인지 셈
-        count = self.coord_history.count(current_pos)
-
-        # 예: 처음 방문이면 1, 계속 벽에 박고 있어서 100번 다 여기였으면 100
-        return count
 
     def render(self):
         if self.render_mode == "rgb_array":

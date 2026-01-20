@@ -14,22 +14,23 @@ INIT_STATE_FILE = os.path.join(BASE_DIR, "game_file/init.state")
 '''실제 변수들'''
 #보상변수의 가중치(PPO)를 설정할 수 있는 부분 // 뱃지의 개수에 따라 다른 가중치를 사용하기로 함. !!!
 REWARD_WEIGHTS = {
-    "default": { "exploration": 0.1, "event": 1.0, "battle": 5.0, "level": 5.0, "gemini": 1.0, "exp": 20.0, "dmg": 300.0, "heal": 10.0, "dead": 0.1 }
+    0: { "exploration": 10.0, "event": 2.0, "battle": 6.0, "level": 6.0, "gemini": 1.0, "exp": 2.0, "dmg": 30.0, "heal": 10.0, "dead":1.0 },
+    "default": { "exploration": 0.1, "event": 1.0, "battle": 5.0, "level": 5.0, "gemini": 1.0, "exp": 2.0, "dmg": 30.0, "heal": 10.0, "dead":1.0 }
 }
 
 #기본 환경 변수
 env_config = {
-    "save_video": True,
-    "headless": True, #pyboy 시뮬레이터를 보이게 할 지의 여부
+    "save_video": False,
+    "headless": False, #pyboy 시뮬레이터를 보이게 할 지의 여부
     "action_freq": 24, #에이전트가 버튼을 한 번 누르면 몇 프레임 동안 꾹 누르고 있을까의 여부, 보통 24프레임 -> 0.4초를 활용함.
-    "max_steps": 2048 * 100, #main.py를 실행했을 때, 최대 에이전트의 step 수
+    "max_steps": 2048 * 200, #main.py를 실행했을 때, 최대 에이전트의 step 수
     "gb_path": GB_PATH,
     "init_state": INIT_STATE_FILE,
 }
 
 #PPO 정책 변수
 train_config = {
-    "total_timesteps": 50_000_000, #AI가 버튼을 누르는 횟수
+    "total_timesteps": 500_000_000, #AI가 버튼을 누르는 횟수
     "learning_rate": 0.0003, #정책 weight를 변화시키는 비율, 너무 크면 확 변하고 너무 작으면 오래 걸림. PPO에서는 일반적으로 0.0001~0.0003을 사용함.
     "n_steps": 2048, #가중치 Update까지의 스텝 수, 2048까지 정보를 모음.
     "batch_size":  128, #64개의 데이터를 가지고 2048 즉, 2048 / 64 -> 32번 학습을 업데이트 함. 너무 작으면 오래 걸림.
@@ -43,8 +44,8 @@ ai_config = {
     "location": "us-central1", #미국 서버
     "model_name": "models/gemini-2.0-flash-001",
     # model_name 인데, gemini 에서도 사용할 수 있는 model이 다르고 비용도 다름.
-    "coach_interval": 512, #LLM을 몇 스텝마다 호출할 지.
-    "key_path": "" #실제 AI 사용 키 json 파일
+    "coach_interval": 256, #LLM을 몇 스텝마다 호출할 지.
+    "key_path": "service_account.json" #실제 AI 사용 키 json 파일
 }
 #LLM을 사용하는 것은 PPO만으로는 시간이 너무 걸리기 때문에, 그 시간을 줄이기 위함임.
 #정답을 풀도록 이끌어 주는 선생님 느낌이라고 생각하면 됨.

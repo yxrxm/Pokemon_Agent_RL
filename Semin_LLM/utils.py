@@ -115,16 +115,19 @@ def get_level_sum(pyboy):
     try:
         party_count = read_uint8(pyboy, MEM_PARTY_COUNT)
         level_sum = 0
+        max_level = 0
         # 파티 포켓몬 수만큼 루프를 돌며 레벨을 더함
         current_addr = MEM_PARTY_LEVELS
 
         for i in range(party_count):
             level = read_uint8(pyboy, current_addr)
             level_sum += level
+            if level > max_level:
+                max_level = level
             current_addr += PARTY_STRUCT_SIZE  # 다음 포켓몬 주소로 점프
-        return level_sum
+        return level_sum, max_level
     except Exception:
-        return 0
+        return 0, 0
 
 
 # ==========================================
@@ -224,3 +227,28 @@ def get_all_events_sum(pyboy):
         total_events += bin(val).count('1')
 
     return total_events
+
+
+def get_party_hp_sum(pyboy):
+    """
+    파티에 있는 모든 포켓몬의 현재 HP 합계를 구합니다.
+    이 값이 0이 되면 게임 오버(눈앞이 캄캄해짐)입니다.
+    """
+    try:
+        party_count = read_uint8(pyboy, MEM_PARTY_COUNT)
+        total_hp = 0
+
+        # 1번 포켓몬 HP 주소 (0xDA4C)
+        current_hp_addr = MEM_P1_HP
+
+        for i in range(party_count):
+            # HP 읽기 (2바이트, 리틀 엔디안)
+            hp = read_uint16(pyboy, current_hp_addr)
+            total_hp += hp
+
+            # 다음 포켓몬 구조체로 점프 (48바이트)
+            current_hp_addr += PARTY_STRUCT_SIZE
+
+        return total_hp
+    except Exception:
+        return 0

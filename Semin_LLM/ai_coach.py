@@ -49,7 +49,7 @@ class LLMCoach:
             total_variation += diff
 
         avg_change = total_variation / (len(recent_frames) - 1)
-        print(f">>> [화면 변화량 체크] 값: {avg_change:.6f} (정지기준: 0.3, 활발하지X 기준: 5)")
+        print(f">>> [화면 변화량 체크] 값: {avg_change:.6f} (정지기준: 0.5, 활발하지X 기준: 5), 조금 활발함 기준: 10")
 
         return avg_change
 
@@ -82,10 +82,12 @@ class LLMCoach:
             if recent_frames:
                 static_score = self._calculate_static_score(recent_frames)
 
-                if static_score <= 0.3:
+                if static_score <= 0.5:
                     static_warning = "\n화면이 정지해 있습니다."
                 elif static_score <= 5:
                     static_warning = "\nAI가 활발하게 움직이지 않습니다."
+                elif static_score <= 10:
+                    static_warning = "\nAI가 조금 활발하게 움직이고 있습니다."
                 else:
                     static_warning = "\nAI가 활발하게 움직이고 있습니다."
 
@@ -93,7 +95,6 @@ class LLMCoach:
             image_part = self._process_image(screen_array)
 
             # 2. [추가] 텍스트 정보(game_status)를 보기 좋게 문자열로 변환
-            # 예: "- HP: 20/20 \n - Battle Mode: No ..." 형태가 됩니다.
             status_text = "\n".join([f"- {k}: {v}" for k, v in game_status.items()])
 
             # 3. [수정] 프롬프트 보강 (이미지 + 텍스트 정보 + 현재 보상 상황)
@@ -110,11 +111,11 @@ class LLMCoach:
             위 정보도 활용해서 AI의 행동을 평가해 줘.
 
             [채점 기준]:
-            - 가점(+0.01점): 현재 게임 내부 데이터가 "AI가 활발하게 움직이고 있습니다."인 경우
-            - 감점(-0.5점): 현재 게임 내부 데이터가 "AI가 활발하게 움직이지 않습니다."인 경우
-            - 감점(-1점): 현재 게임 내부 데이터가 "화면이 정지해 있습니다."인 경우이고 전투 중에서 멈춘 경우
-            - 감점(-3점): 현재 게임 내부 데이터가 "화면이 정지해 있습니다."인 경우이고 전투가 아닌 화면에서 멈춘 경우
-
+            - 가점(+0.1점): 현재 게임 내부 데이터가 "AI가 활발하게 움직이고 있습니다."인 경우
+            - 감점(-0.5점): 현재 게임 내부 데이터가 "AI가 조금 활발하게 움직이고 있습니다."인 경우
+            - 감점(-0.3점): 현재 게임 내부 데이터가 "AI가 활발하게 움직이지 않습니다."인 경우
+            - 감점(-0.8점): 현재 게임 내부 데이터가 "화면이 정지해 있습니다."인 경우이고 전투 중에서 멈춘 경우
+            - 감점(-1점): 현재 게임 내부 데이터가 "화면이 정지해 있습니다."인 경우이고 전투가 아닌 화면에서 멈춘 경우
             Output must be strict JSON:
             {{
                 "score": <-5~10 사이의 숫자 (소수점 가능)>,

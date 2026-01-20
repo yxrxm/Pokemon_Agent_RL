@@ -17,50 +17,70 @@ class MetricLoggingCallback(BaseCallback):
         infos = self.locals.get("infos", [])
         if not infos:
             return True
+        #전체 보상
+        total_reward = [info.get("stats/total_reward") for info in infos]
 
-        # 1. 기본 통계 추출
+        #Game 내 count 내역
         badges = [info.get("game/badges", 0) for info in infos]
         explorations = [info.get("game/exploration", 0) for info in infos]
+        map_count = [info.get("game/map_count", 0) for info in infos]
         level_sums = [info.get("game/level_sum", 0) for info in infos]
         deaths = [info.get("game/deaths", 0) for info in infos]
-
         heals_battle = [info.get("game/heal_battle", 0) for info in infos]
         heals_field = [info.get("game/heal_field", 0) for info in infos]
-        total_heals = [b + f for b, f in zip(heals_battle, heals_field)]
+        wins = [info.get("game/battle_wins", 0) for info in infos]
+        opp_max_level = [info.get("game/opp_max_level", 0) for info in infos]
+        party_max_levels = [info.get("game/party_max_level", 0) for info in infos]
+        overlap_step = [info.get("game/overlap_step", 0) for info in infos]
+        money = [info.get("game/money", 0) for info in infos]
+        battle_penalty = [info.get("reward/battle_penalty", 0) for info in infos]
+        trainer_Bcount = [info.get("game/battle_trainer", 0) for info in infos]
 
-        # 2. 보상 상세 내역 추출
-        # GoldEnv에서 "reward/badge" 등으로 보냅니다.
+        #보상 상세 내역
         rew_badge = [info.get("reward/badge", 0) for info in infos]
         rew_battle = [info.get("reward/battle", 0) for info in infos]
         rew_exp = [info.get("reward/exp", 0) for info in infos]
         rew_dmg = [info.get("reward/dmg", 0) for info in infos]
         rew_dead = [info.get("reward/dead", 0) for info in infos]
-        rew_explore = [info.get("reward/explore", 0) for info in infos]  # 탐험 점수 추가
-        rew_penalty = [info.get("reward/penalty", 0) for info in infos]  # 패널티 점수 추가
+        rew_explore = [info.get("reward/explore", 0) for info in infos]
+        rew_penalty = [info.get("reward/penalty", 0) for info in infos]
         rew_stuck = [info.get("reward/stuck", 0) for info in infos]
         rew_event = [info.get("reward/event", 0) for info in infos]
+        rew_level = [info.get("reward/level", 0) for info in infos]
         rew_gemini = [info.get("reward/gemini", 0) for info in infos]
+        rew_map = [info.get("reward/map", 0) for info in infos]
 
+        
+        self.logger.record("스텟/전체 보상", np.mean(total_reward))
+        #게임 내 횟수 내역
+        self.logger.record("게임/뱃지 개수", np.mean(badges))
+        self.logger.record("게임/탐험 좌표 수", np.mean(explorations))
+        self.logger.record("게임/탐험 맵 수", np.mean(map_count))
+        self.logger.record("게임/내 파티 레벨 합", np.mean(level_sums))
+        self.logger.record("게임/내 파티 최대 레벨", np.mean(party_max_levels))
+        self.logger.record("게임/사망 횟수", np.mean(deaths))
+        self.logger.record("게임/배틀 힐 횟수", np.mean(heals_battle))
+        self.logger.record("게임/필드 힐 횟수", np.mean(heals_field))
+        self.logger.record("게임/전투 승리 횟수", np.mean(wins))
+        self.logger.record("게임/상대 최대 레벨", np.max(opp_max_level))
+        self.logger.record("게임/중복 스텝 횟수 (100 중 20회 이상일 경우)", np.mean(overlap_step))
+        self.logger.record("게임/소지한 돈", np.mean(money))
+        self.logger.record("게임/트레이너 배틀 수", np.mean(trainer_Bcount))
 
-        # 3. 로거에 기록 (화면에 표시될 이름)
-        self.logger.record("game/badges", np.mean(badges))
-        self.logger.record("game/exploration", np.mean(explorations))
-        self.logger.record("game/level_sum", np.mean(level_sums))
-        self.logger.record("game/deaths", np.mean(deaths))
-        self.logger.record("game/heals", np.mean(total_heals))
-
-        # 리워드 상세 기록
-        self.logger.record("reward/badge", np.mean(rew_badge))
-        self.logger.record("reward/battle", np.mean(rew_battle))
-        self.logger.record("reward/exp", np.mean(rew_exp))
-        self.logger.record("reward/dmg", np.mean(rew_dmg))
-        self.logger.record("reward/dead", np.mean(rew_dead))
-        self.logger.record("reward/explore", np.mean(rew_explore))
-        self.logger.record("reward/penalty", np.mean(rew_penalty))
-        self.logger.record("reward/stuck", np.mean(rew_stuck))
-        self.logger.record("reward/gemini", np.mean(rew_gemini))
-        self.logger.record("reward/event", np.mean(rew_event))
-        self.logger.record("reward/gemini", np.mean(rew_gemini))
+        #보상 상세 내역
+        self.logger.record("보상/뱃지개수", np.mean(rew_badge))
+        self.logger.record("보상/승리 보상", np.mean(rew_battle))
+        self.logger.record("보상/경험치 보상", np.mean(rew_exp))
+        self.logger.record("보상/대미지 보상", np.mean(rew_dmg))
+        self.logger.record("보상/탐험 보상", np.mean(rew_explore))
+        self.logger.record("보상/사망 패널티", np.mean(rew_dead))
+        self.logger.record("보상/중복 스텝 패널티", np.mean(rew_penalty))
+        self.logger.record("보상/벽 박기 패널티", np.mean(rew_stuck))
+        self.logger.record("보상/배틀 지속 패널티", np.mean(battle_penalty))
+        self.logger.record("보상/제미나이 보상", np.mean(rew_gemini))
+        self.logger.record("보상/이벤트 보상", np.mean(rew_event))
+        self.logger.record("보상/레벨업 보상", np.mean(rew_level))
+        self.logger.record("보상/새로운 맵 보상", np.mean(rew_map))
 
         return True
 
@@ -120,7 +140,7 @@ class SpeedrunCallback(BaseCallback):
                     self.model.save(save_path)
 
                     if self.verbose > 0:
-                        print(f"   💾 모델 저장 완료: {model_name}.zip")
+                        print(f"모델 저장 완료: {model_name}.zip")
 
         return True
 
