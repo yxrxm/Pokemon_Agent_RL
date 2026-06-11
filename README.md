@@ -354,9 +354,16 @@ tensorboard --logdir sessions
 
 ---
 
-## 참고 자료
+## 참고 자료 및 Credits
 
-- AI Plays Pokemon
+본 프로젝트는 포켓몬 게임 강화학습 환경을 구현하는 과정에서 아래 프로젝트와 자료들을 참고했습니다.
+
+- [PokemonRedExperiments](https://github.com/PWhiddy/PokemonRedExperiments)  
+  - 원작자: PWhiddy
+  - 포켓몬 레드 버전을 강화학습으로 플레이하는 오픈소스 프로젝트입니다.
+  - 본 프로젝트는 해당 프로젝트의 강화학습 환경 구성 방식, PyBoy 기반 에뮬레이터 제어 방식, 게임 메모리 기반 상태 관찰 아이디어를 참고했습니다.
+  - 본 저장소에서는 포켓몬 골드 버전에 맞게 메모리 주소, 맵 ID, 보상 로직, 전투 보상, stuck penalty 등을 수정 및 확장했습니다.
+
 - PyBoy Documentation
 - Stable-Baselines3 PPO
 - Pokemon Gold/Silver RAM Map
@@ -369,6 +376,9 @@ tensorboard --logdir sessions
 
 본 프로젝트는 동아리 팀 프로젝트로 진행되었습니다.  
 저장소에는 팀원들이 함께 작성하고 개선한 코드가 포함되어 있습니다.
+
+또한 강화학습 환경 구성 과정에서 PWhiddy의 `PokemonRedExperiments` 프로젝트를 참고했습니다.  
+본 프로젝트는 이를 포켓몬 골드 버전에 맞게 수정하고, 맵 진행 보상, 전투 보상, stuck penalty, 주요 거점 보상 등을 추가하여 확장한 프로젝트입니다.
 
 제가 주로 기여한 부분은 다음과 같습니다.
 
